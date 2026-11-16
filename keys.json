@@ -1,8 +1,5 @@
 {
   "global": {
     "ctrl-shift-d": "mod.open:dockr"
-  },
-  "mod:dockr": {
-    "ctrl-shift-d": "dockr.hide"
   }
 }

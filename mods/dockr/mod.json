@@ -1,13 +1,34 @@
 {
   "place": "none",
   "title": "Dockr",
-  "focusable": true,
-  "overlay": { "kind": "popup", "at": "top", "offset": 0, "width": 1, "height": 1, "frame": "none" },
+  "overlay": {
+    "kind": "dialog",
+    "width": 760,
+    "height": 0.8
+  },
   "palette": [
-    { "title": "Dockr: Toggle", "command": "layout.toggle", "args": { "id": "dockr" }, "about": "Show or hide the Dockr panel (ctrl-shift-d)" },
-    { "title": "Dockr: Keys", "command": "mod.open", "args": { "name": "dockr" }, "about": "Show Dockr and give it the keyboard (ctrl-shift-d). Again hides it. j/k move, s start, x stop, r restart, q leaves" },
-    { "title": "Dockr: Reload", "command": "dockr.reload", "about": "Read dockr.json, the worktrees and Docker again" },
-    { "title": "Dockr: Disk", "command": "dockr.disk", "about": "What the Stack and Docker hold on disk, and a clean-up that never removes volumes" },
-    { "title": "Dockr: Stack logs", "command": "dockr.logs", "about": "Every Service's log lines in one window, in time order" }
+    {
+      "title": "Dockr: Open",
+      "command": "mod.open",
+      "args": {
+        "name": "dockr"
+      },
+      "about": "Open the container list (ctrl-shift-d). Again closes it. j/k move, s start, x stop, r restart, ? lists every key"
+    },
+    {
+      "title": "Dockr: Reload",
+      "command": "dockr.reload",
+      "about": "Read dockr.json, the worktrees and Docker again"
+    },
+    {
+      "title": "Dockr: Disk",
+      "command": "dockr.disk",
+      "about": "What the Stack and Docker hold on disk, and a clean-up that never removes volumes"
+    },
+    {
+      "title": "Dockr: Stack logs",
+      "command": "dockr.logs",
+      "about": "Every Service's log lines in one window, in time order"
+    }
   ]
 }

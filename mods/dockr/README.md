@@ -1,17 +1,15 @@
 # Dockr
 
-A side panel for Herdr that lists Docker containers and sets which checkout each compose service runs from: its repo's Main checkout or one of its git worktrees.
+A dialog for Herdr that lists Docker containers and sets which checkout each compose service runs from: its repo's Main checkout or one of its git worktrees.
 
 ## Install
 
 1. Copy `mods/dockr/` to `~/.config/herdr-app/mods/dockr/`.
-2. In your own layout, add a block beside the work area and keep its id `dockr`:
-   `{ "id": "dockr", "type": "block", "content": { "mod": "dockr" }, "size": { "px": 400 }, "min": 300, "hidden": true }`
-3. Merge `keys.json` into `~/.config/herdr-app/keys.json`. It binds `ctrl-shift-d` twice: globally to `mod.open:dockr`, which shows the panel and gives it the keyboard, and in the `mod:dockr` section to `dockr.hide`, which hides the panel while it has the keyboard.
-4. Write `~/.config/herdr-app/dockr.json` (below).
-5. Run `herdr-app check ~/.config/herdr-app/mods/dockr`.
+2. Merge `keys.json` into `~/.config/herdr-app/keys.json`. It binds `ctrl-shift-d` to `mod.open:dockr`, which opens the dialog and closes it again.
+3. Write `~/.config/herdr-app/dockr.json` (below).
+4. Run `herdr-app check ~/.config/herdr-app/mods/dockr`.
 
-Dockr starts the first time its panel is shown. Toasts only arrive after that.
+Dockr runs only while its dialog is open, so it posts no toasts while closed.
 
 ## The config file
 
@@ -47,7 +45,7 @@ Dockr starts the first time its panel is shown. Toasts only arrive after that.
 
 ## Using it
 
-The panel is a list of containers, grouped the way Docker Desktop groups them: one group per compose project, then the containers in none. No config is needed for that. A project listed in `dockr.json` also gets the checkout picker.
+The dialog is a list of containers, grouped the way Docker Desktop groups them: one group per compose project, then the containers in none. No config is needed for that. A project listed in `dockr.json` also gets the checkout picker.
 
 **The toolbar**
 - **Search** filters by name, image, branch or published port. `Running` hides everything that is not running.
@@ -71,7 +69,7 @@ The panel is a list of containers, grouped the way Docker Desktop groups them: o
 
 **Keys**
 
-The keys follow CodeyPacker's mods (`run`, `jump`, `branch`), so they are the same letters you use there. `ctrl-shift-d` shows the panel and gives it the keyboard. Letter badges and a short legend (move, open, start or stop, restart) appear while it has it. `?` lists every key that works on the selected row.
+The keys follow CodeyPacker's mods (`run`, `jump`, `branch`), so they are the same letters you use there. `ctrl-shift-d` opens the dialog, which has the keyboard while it is open, and closes it again. Letter badges and a short legend (move, open, start or stop, restart) show at all times. `?` lists every key that works on the selected row.
 
 | Key | Action |
 |---|---|
@@ -89,14 +87,14 @@ The keys follow CodeyPacker's mods (`run`, `jump`, `branch`), so they are the sa
 | `D` | remove the group's containers (asks first) |
 | `h` / `l` | fold / unfold the group |
 | `g` / `G` | first / last |
-| `/` | search (`enter` or `esc` returns to the list) |
+| `/` | search (`enter` returns to the list) |
 | `m` | the `⋯` menu (`j`/`k`, `enter`) |
-| `q`, `esc` | hand the keyboard back to your pane |
+| `q`, `esc` | close the dialog. `esc` closes it from anywhere, the search box and the key list included |
 
 - **Container window:** `h`/`l` switch tabs, `j`/`k` move a line, `g`/`G` top and end, `/` search, `n`/`N` next and previous match, `f` follow, `t` timestamps, `y` copy, `s`/`x`/`r` start, stop and restart, `T` terminal, `q` close.
 - **Checkout picker:** it has a filter box, so plain letters type. Arrows or `ctrl-j`/`ctrl-k` move, `enter` switches, `ctrl-r` rebuilds, `ctrl-s` toggles "Start if stopped".
-- The panel is `focusable`, so Herdr's pane movement keys reach it too, and "Dockr: Keys" in the palette does what `ctrl-shift-d` does.
-- Dockr reaches the panel by stepping focus to the right, and leaves to the left. A layout with the panel on the left needs those two directions swapped in `main.js`.
+- "Dockr: Open" in the palette does what `ctrl-shift-d` does.
+- A container or log view opens on top of the dialog. `esc` closes it and returns to the list.
 
 **Choosing a checkout** (projects in `dockr.json`)
 - Click the branch on a container's second line. Type to filter, arrow keys to move, Enter to switch. Each checkout says what it costs: `recreate` takes seconds, `rebuild` builds the image first.

@@ -8,7 +8,7 @@
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input, ScrollHandle } from "gpui-base";
-import { closeOverlay, focused, hc, layout, nextCommand, notify, openOverlay, panes, props, run, setShared, settings, shared, spaces, terminals, theme } from "herdr";
+import { closeOverlay, focused, layout, nextCommand, notify, openOverlay, panes, props, run, setShared, settings, shared, spaces, terminals, theme } from "herdr";
 import * as model from "./model.js";
 import * as docker from "./docker.js";
 import { Store } from "./store.js";
@@ -41,15 +41,10 @@ export default class Dockr extends View {
     this.disking = props()?.disk ?? null;
     if (this.disking) return disk.init(this, cx);
 
-    // Opened by its key (mod.open): this copy only passes the key on to the panel and closes.
-    // A hidden panel hears no commands, and Herdr's mod.open is the one key action that always runs.
-    this.passing = props()?.overlay != null;
-    if (this.passing) {
-      if (!model.modShown(layout(), "dockr")) run("layout.show", { id: "dockr" });
-      setShared(REQUEST, { n: Date.now(), kind: "keys" });
-      closeOverlay(props().overlay);
-      return;
-    }
+    // Opened by its key (mod.open): the list is a dialog, which has the keyboard while it is open.
+    // In a layout block it still draws, and takes keys when Herdr hands it the keyboard.
+    this.modal = props()?.overlay != null;
+    if (this.modal) this.handle.focus();
 
     this.store = new Store(load("built", {}), (built) => localStorage.setItem("built", JSON.stringify(built)));
     this.watching = new Set(); // machines with an event wait running
@@ -65,9 +60,7 @@ export default class Dockr extends View {
     this.search.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
     this.search.on("submit", (_e, cx) => { this.enterKeys(); cx.notify(); });
     this.typing = false;       // the search box has the keyboard
-    this.heldAt = 0;           // when the panel was last drawn holding the keyboard
     this.help = false;         // every key is listed, after "?"
-    this.gone = false;         // the keyboard left: a press outside the panel, or a key that hands it back
     this.kb = false;           // the panel has the keyboard, asked of its focus handle at each render: letters, selection and the legend show
     this.sel = null;           // the selected item's key
     this.typed = "";           // the hint letters typed so far
@@ -84,7 +77,7 @@ export default class Dockr extends View {
     this.folded = load("folded2", {});
     this.startStopped = localStorage.getItem("start") === "1";
     this.seenRequest = shared(REQUEST)?.n ?? 0;
-    this.wasShown = model.modShown(layout(), "dockr");
+    this.wasShown = this.visible();
 
     cx.spawn(async (cx) => { await this.reload(cx); });
     cx.spawn(async (cx) => {
@@ -92,9 +85,7 @@ export default class Dockr extends View {
         const c = await nextCommand();
         this.noteHidden();
         if (c === "reload") await this.reload(cx);
-        else if (c === "focus") { this.gotFocus = true; this.enterKeys(); }
-        else if (c === "keys") this.keysCommand(cx);
-        else if (c === "hide") this.hidePanel();
+        else if (c === "focus") this.enterKeys();
         else if (c === "disk" || c === "logs") { const g = this.groups().find((x) => x.managed) ?? this.groups().find((x) => x.name); if (g) await this.doAction(cx, g.key, c); }
         else if (c === "downConfirmed" && this.pendingDown) { const name = this.pendingDown; this.pendingDown = null; await this.runOp(cx, await this.store.prepareStack(name, "down")); }
         cx.notify();
@@ -105,8 +96,8 @@ export default class Dockr extends View {
   // The panel: loading
 
   post(toasts) {
-    if (model.modShown(layout(), "dockr")) return;
-    for (const t of toasts) notify({ title: t.title, body: t.body ? `${t.stack}: ${t.body}` : t.stack, level: t.level, action: { name: "layout.show", args: { id: "dockr" } } });
+    if (this.visible()) return;
+    for (const t of toasts) notify({ title: t.title, body: t.body ? `${t.stack}: ${t.body}` : t.stack, level: t.level, action: { name: "mod.open", args: { name: "dockr" } } });
   }
 
   async reload(cx) {
@@ -152,7 +143,7 @@ export default class Dockr extends View {
     this.sampling.add(machine);
     cx.spawn(async (cx) => {
       try {
-        while (model.modShown(layout(), "dockr")) {
+        while (this.visible()) {
           const r = await docker.waitStats(machine || null);
           if (r.error) { this.statsOff.add(machine); return; } // Reload tries again
           const now = model.parseStats(r.text);
@@ -170,61 +161,28 @@ export default class Dockr extends View {
    * Nothing draws while the panel is hidden, so drawing cannot notice that it was. The loops that
    * keep running do: they call this, and the next draw then knows the panel has just been shown.
    */
-  noteHidden() { if (!model.modShown(layout(), "dockr")) this.wasShown = false; }
+  noteHidden() { if (!this.visible()) this.wasShown = false; }
+
+  /** The list is on screen: always as a dialog, and in a layout block while that block shows. */
+  visible() { return this.modal || model.modShown(layout(), "dockr"); }
 
   // The panel: keys, as CodeyPacker's run mod has them
 
   /** Herdr has handed this panel the keyboard (its "focus" command), or the search box gave it back. */
   enterKeys() {
-    this.gone = false;
     this.typed = "";
     this.handle.focus();
   }
 
-  /**
-   * The panel's key (ctrl-shift-d): hidden, it shows and takes the keyboard. Shown without the
-   * keyboard, it takes it. Holding the keyboard, it gives it back and hides.
-   */
-  keysCommand(cx) {
-    // While the panel holds the keyboard its own key section hides it (hidePanel), so this is
-    // reached only without it. Should that section be missing, the key's popup has just taken the
-    // keyboard off the panel: ask whether the panel held it a moment ago.
-    if (Date.now() - this.heldAt < 1500) return this.hidePanel();
-    cx.spawn(async (cx) => { await this.grabKeys(cx); });
-  }
-
-  /** Gives the keyboard back to the pane and hides the panel. */
-  hidePanel() {
-    this.gone = true;
-    this.heldAt = 0;
-    this.typed = "";
-    this.help = false;
-    run("pane.go", { direction: "left" });
-    run("layout.hide", { id: "dockr" });
-  }
-
-  /**
-   * Asks Herdr for the keyboard. Only Herdr can move it off a terminal, and it does so with
-   * pane.go, one step at a time: step toward the panel until its "focus" command arrives.
-   */
-  async grabKeys(cx) {
-    if (this.grabbing) return;
-    this.grabbing = true;
-    this.gotFocus = false;
-    try {
-      for (let i = 0; i < 6 && !this.gotFocus; i++) {
-        run("pane.go", { direction: "right" });
-        await hc(["--version"]).catch(() => null); // lets the "focus" command arrive before the next step
-      }
-    } finally { this.grabbing = false; cx.notify(); }
-  }
-
-  /** Hands the keyboard back to the pane beside the panel. */
+  /** q and esc: the dialog closes. A layout block hands the keyboard back to the pane beside it. */
   leaveKeys() {
-    this.gone = true;
     this.typed = "";
-    run("pane.go", { direction: "left" });
+    if (this.modal) closeOverlay(props().overlay);
+    else run("pane.go", { direction: "left" });
   }
+
+  /** How a log or container view opens. Herdr draws windows under dialogs, so the dialog opens them as dialogs on top of itself. */
+  over(key) { return this.modal ? { kind: "dialog" } : { kind: "window", key }; }
 
   /** What the keys need to know about the selected item. */
   facts(item) {
@@ -336,7 +294,7 @@ export default class Dockr extends View {
   openLogs(title, key, machine, rows, terminal) {
     const sources = rows.filter((r) => r.container).map((r) => ({ name: r.container.name, label: r.name }));
     if (!sources.length) { this.note = "Nothing has been created yet, so there are no logs."; return; }
-    openOverlay({ mod: "dockr", kind: "window", key: `dockr-logs-${idOf(key)}`, width: 1100, height: 680, props: { logs: { title, machine: machine ?? null, sources, terminal } } });
+    openOverlay({ mod: "dockr", ...this.over(`dockr-logs-${idOf(key)}`), width: 1100, height: 680, props: { logs: { title, machine: machine ?? null, sources, terminal } } });
   }
 
   async tail(cx, row, kind) {
@@ -393,7 +351,6 @@ export default class Dockr extends View {
     const req = shared(REQUEST);
     if (!req?.n || req.n === this.seenRequest) return;
     this.seenRequest = req.n;
-    if (req.kind === "keys") return this.keysCommand(cx);
     if (req.kind !== "tail" && req.kind !== "act") {
       this.startStopped = !!req.start;
       localStorage.setItem("start", this.startStopped ? "1" : "0");
@@ -429,7 +386,7 @@ export default class Dockr extends View {
     const c = r.container;
     if (!c) { this.note = `${r.name} has no container yet. Start it first.`; return; }
     const stack = r.stack ? this.store.stack(r.stack) : null;
-    openOverlay({ mod: "dockr", kind: "window", key: `dockr-c-${idOf(r.key)}`, width: 1100, height: 680, props: { logs: {
+    openOverlay({ mod: "dockr", ...this.over(`dockr-c-${idOf(r.key)}`), width: 1100, height: 680, props: { logs: {
       title: r.name, machine: stack ? stack.machine ?? null : this.store.machineOf(c), sources: [{ name: c.name, label: r.name }],
       terminal: stack ? { stack: r.stack, service: r.name } : null,
       info: { key: r.key, container: c, running: c.state === "running", why: model.why(c), runs: r.service ? r.actual?.path ?? null : null, set: r.service ? r.set?.path ?? null : null, drift: r.drift },
@@ -736,16 +693,13 @@ export default class Dockr extends View {
 
   renderPanel(t, cx) {
     // Shown again after being hidden: read the files and Docker once.
-    const shown = model.modShown(layout(), "dockr");
+    const shown = this.visible();
     if (shown && !this.wasShown) cx.spawn(async (cx) => { await this.reload(cx); });
     this.wasShown = shown;
     if (shown) for (const m of Object.keys(this.store.byMachine)) this.sample(cx, m);
     this.takeRequest(cx);
 
-    // The handle still answers "focused" in the render that follows a press elsewhere or a leave,
-    // and nothing draws the panel again once the keyboard has moved, so those two say so themselves.
-    this.kb = (this.handle.is_focused() && !this.gone) || this.typing;
-    if (this.kb) this.heldAt = Date.now();
+    this.kb = this.modal || this.handle.is_focused() || this.typing;
     const ops = this.ops(), branch = this.branch();
     this.announce(ops);
     const groups = this.groups(), filtering = !!this.query.trim() || this.onlyRunning;
@@ -777,10 +731,8 @@ export default class Dockr extends View {
     }
     const undo = this.undo;
 
-    return v_flex().id("dockr").track_focus(this.handle).size_full().min_h(0).rounded(10).overflow_hidden().bg(t.background).border_1().border_color(this.kb ? t.accent : t.border).text_color(t.foreground).text_size(12.5)
+    return v_flex().id("dockr").track_focus(this.handle).size_full().min_h(0).overflow_hidden().bg(t.background).when(!this.modal, (el) => el.rounded(10).border_1().border_color(this.kb ? t.accent : t.border)).text_color(t.foreground).text_size(12.5)
       .on_key_down((e, cx) => this.panelKey(e, cx))
-      .on_mouse_down("left", (_e, cx) => { this.gone = false; cx.notify(); })
-      .on_mouse_down_out((_e, cx) => { if (!this.gone) { this.gone = true; this.help = false; cx.notify(); } })
       .child(h_flex().w_full().h(40).pl(10).pr(6).gap(6).flex_none().items_center().border_b(1).border_color(t.border)
         .child(svg("icons/docker.svg").size(15).flex_none().text_color(t.muted))
         .child(h_flex().flex_1().min_w(0).h(26).pl(7).gap(5).items_center().rounded(6).border_1().border_color(t.border).bg(t.surface)
@@ -808,12 +760,12 @@ export default class Dockr extends View {
       .child(body)
       .when(this.kb && this.help && !this.typing, (el) => el.child(this.renderKeys(t, model.keyHints(current, this.facts(current)))))
       .when(this.kb && !(this.help && !this.typing), (el) => el.child(div().w_full().flex_none().px(12).py(8).border_t(1).border_color(t.border)
-        .child(legend(t, this.typing ? [["enter", "back to the list"], ["esc", "back to the list"]] : model.coreHints(current, this.facts(current))))));
+        .child(legend(t, this.typing ? [["enter", "back to the list"], ["esc", this.modal ? "close" : "back to the list"]] : model.coreHints(current, this.facts(current))))));
   }
 
   /** Every key that works on the selected item, in two columns, after "?". */
   renderKeys(t, hints) {
-    const all = [...hints.filter(([k]) => k !== "q"), ["g / G", "first / last"], ["h / l", "fold / unfold group"], ["a letter", "jump to that row"], ["q", "leave"], ["?", "hide this list"]];
+    const all = [...hints.filter(([k]) => k !== "q"), ["g / G", "first / last"], ["h / l", "fold / unfold group"], ["a letter", "jump to that row"], ["q", this.modal ? "close" : "leave"], ["?", "hide this list"]];
     const half = Math.ceil(all.length / 2);
     const col = (list) => v_flex().flex_1().min_w(0).gap(3).children(list.map(([k, what]) => h_flex().w_full().h(18).gap(8).items_center().text_size(11)
       .child(div().w(46).flex_none().font_semibold().text_color(t.accent).child(k))
@@ -958,7 +910,6 @@ export default class Dockr extends View {
 
   render(cx) {
     const t = theme();
-    if (this.passing) return div();
     if (this.peeked) return this.renderBar(t);
     if (this.picking) return this.renderPicker(t);
     if (this.diagnosing) return diagnose.render(this, t);

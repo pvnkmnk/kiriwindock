@@ -74,6 +74,8 @@ export default class Dockr extends View {
     this.post(await this.store.reload());
     for (const m of this.store.machines()) this.watch(cx, m);
     cx.notify();
+    await this.store.checkStale();
+    cx.notify();
   }
 
   /** One wait on Docker's events per Machine. It ends for good when the wait cannot run there. */
@@ -94,6 +96,8 @@ export default class Dockr extends View {
         if (!r.event) continue;
         since = r.since;
         this.post(await this.store.look(machine));
+        cx.notify();
+        await this.store.checkStale();
         cx.notify();
       }
     });
@@ -337,6 +341,12 @@ export default class Dockr extends View {
           .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
           .on_click((_e, cx) => { cx.spawn(async (cx) => { await this.doSwitch(cx, r.stack, { [r.name]: r.set }, false, `Apply ${r.name}`); }); })
           .child("drift"));
+      } else if (this.store.stale[r.key] && !busy) {
+        head.child(div().id(`stale-${id}`).flex_none().px(5).h(16).rounded(3).text_size(10).border_1().border_color(t.ansi3).text_color(t.ansi3).cursor_pointer().hover((s) => s.bg(t.selected))
+          .tooltip(`The dependency files in ${model.sourceName(r.actual)} differ from the ones in the image. Click to rebuild.`)
+          .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+          .on_click((_e, cx) => { cx.spawn(async (cx) => { await this.runOp(cx, await this.store.prepareRebuild(r)); }); })
+          .child("rebuild needed"));
       } else if (hint && !busy) {
         head.child(div().id(`hint-${id}`).flex_none().px(5).h(16).rounded(3).text_size(10).border_1().border_color(t.accent).text_color(t.accent).cursor_pointer().hover((s) => s.bg(t.selected))
           .tooltip(`This space is on ${hint.branch}, and ${r.name} has a worktree there. Click to switch.`)

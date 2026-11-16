@@ -153,6 +153,24 @@ test("the log wait returns new lines without losing or repeating any, and says w
   } finally { spawnSync("docker", ["rm", "-f", name], { stdio: "ignore" }); }
 });
 
+test("a checkout whose dependencies changed is marked as needing a rebuild, until it is rebuilt", opts, async () => {
+  const file = join(root, "web", "package.json"), before = readFileSync(file, "utf8");
+  await store.checkStale();
+  assert.deepEqual(store.stale, {});
+  const rebuild = async () => { const r = run(await store.prepareRebuild(row("web"))); assert.equal(r.status, 0, r.stderr); await look(); await store.checkStale(); };
+  try {
+    writeFileSync(file, '{"name":"web","version":"9.9.9"}\n');
+    await store.checkStale();
+    assert.deepEqual(store.stale, { [`${NAME}/web`]: true });
+    await rebuild();
+    assert.deepEqual(store.stale, {});
+  } finally { writeFileSync(file, before); }
+  await store.checkStale();
+  assert.deepEqual(store.stale, { [`${NAME}/web`]: true });
+  await rebuild();
+  assert.deepEqual(store.stale, {});
+});
+
 test("the stats wait returns one sample that names the running containers", opts, async () => {
   const r = await docker.waitStats(null);
   assert.equal(r.error, undefined);

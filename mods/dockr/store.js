@@ -22,6 +22,8 @@ export class Store {
     this.quiet = {};           // container name -> when the user last acted on it
     this.exits = {};           // container name -> { finishedAt, restarts, times }: its exits, for restart loops
     this.loops = new Set();    // container names in a restart loop at the last look
+    this.stale = {};           // "stack/service" -> true: its checkout's manifests differ from its image
+    this.imageHashes = {};     // "image id|manifests" -> the manifests' hash inside that image
     this.tails = {};           // container id -> { key, lines }: the last lines of one that is not well
     this.pendingBuilt = {};    // "stack/service" -> { path, at }: a build of an unmounted Service under way
     this.built = saved;
@@ -96,6 +98,26 @@ export class Store {
     this.prev = next;
     await this.readTails(machine, r.containers);
     return out;
+  }
+
+  /**
+   * Marks each mounted Service whose checkout's dependency manifests differ from its image, so it
+   * needs a rebuild. An image is looked into once, then remembered by its id.
+   */
+  async checkStale() {
+    const stale = {};
+    await Promise.all(this.view().groups.flatMap((g) => g.rows.map(async (r) => {
+      if (!r.service || !r.container || !r.mounted || !r.actual) return;
+      const m = g.stack.machine, files = r.service.manifests;
+      const key = `${r.container.imageId}|${files.join("|")}`;
+      if (!(key in this.imageHashes)) {
+        const h = await docker.imageHash(m, r.container.imageId, files);
+        if (h) this.imageHashes[key] = h; else return;
+      }
+      const host = await docker.sourceHash(m, r.actual.path, files);
+      if (host && host !== this.imageHashes[key]) stale[r.key] = true;
+    })));
+    this.stale = stale;
   }
 
   /** The Machine a container was read from, null for this computer. */

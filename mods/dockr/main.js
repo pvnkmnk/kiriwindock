@@ -110,6 +110,8 @@ export default class Dockr extends View {
   }
 
   async reload(cx) {
+    this.note = "";
+    this.undo = null;
     this.statsOff.clear();
     this.post(await this.store.reload());
     for (const m of this.store.machines()) this.watch(cx, m);
@@ -800,7 +802,9 @@ export default class Dockr extends View {
             const u = this.undo;
             this.undo = null;
             await this.doSwitch(cx, u.stack, u.targets, false, `Back to ${u.label}`);
-          }, { tip: "Undo the last Switch" })))))
+          }, { tip: "Undo the last Switch" })))
+          .child(div().id("note-close").flex_none().px(5).py(1).rounded(4).cursor_pointer().hover((x) => x.bg(t.raised)).tooltip("Dismiss").child("✕")
+            .on_click((_e, cx) => { this.note = ""; this.undo = null; cx.notify(); }))))
       .child(body)
       .when(this.kb && this.help && !this.typing, (el) => el.child(this.renderKeys(t, model.keyHints(current, this.facts(current)))))
       .when(this.kb && !(this.help && !this.typing), (el) => el.child(div().w_full().flex_none().px(12).py(8).border_t(1).border_color(t.border)

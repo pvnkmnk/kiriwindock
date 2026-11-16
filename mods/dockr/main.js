@@ -3,7 +3,7 @@
 // from waiting on `docker events`, and files are read when the panel shows and before each action.
 //
 // Faces, chosen by props: the panel, the Source picker (a popup), the bar over a peeked terminal
-// the Diagnose dialog (diagnose.js) and the log window (logs.js).
+// the Diagnose dialog (diagnose.js), the log window (logs.js) and the Disk dialog (disk.js).
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
@@ -13,6 +13,7 @@ import * as docker from "./docker.js";
 import { Store } from "./store.js";
 import * as diagnose from "./diagnose.js";
 import * as logs from "./logs.js";
+import * as disk from "./disk.js";
 
 const icon = (name) => `mods/dockr/icons/${name}.svg`;
 const REQUEST = "dockr.request"; // the picker's ask, handed to the panel through shared state
@@ -31,6 +32,8 @@ export default class Dockr extends View {
     if (this.diagnosing) return diagnose.init(this, cx);
     this.logging = props()?.logs ?? null;
     if (this.logging) return logs.init(this, cx);
+    this.disking = props()?.disk ?? null;
+    if (this.disking) return disk.init(this, cx);
 
     this.store = new Store(load("built", {}), (built) => localStorage.setItem("built", JSON.stringify(built)));
     this.watching = new Set(); // machines with an event wait running
@@ -55,6 +58,7 @@ export default class Dockr extends View {
       for (;;) {
         const c = await nextCommand();
         if (c === "reload") await this.reload(cx);
+        else if (c === "disk") { const g = this.store.view().groups[0]; if (g) openOverlay({ mod: "dockr", kind: "dialog", width: 560, height: 600, props: { disk: { stack: g.stack.name, machine: g.stack.machine ?? null } } }); }
         else if (c === "logs") { const g = this.store.view().groups[0]; if (g) this.openLogs(`Logs · ${g.stack.name}`, g.stack.name, g.stack.machine, g.rows, null); }
         else if (c === "downConfirmed" && this.pendingDown) { const name = this.pendingDown; this.pendingDown = null; await this.runOp(cx, await this.store.prepareStack(name, "down")); }
         cx.notify();
@@ -464,6 +468,9 @@ export default class Dockr extends View {
         .child(div().flex_none().text_size(11).text_color(t.dim).child(`${g.running} up${g.stack.machine ? ` · ${g.stack.machine}` : ""}${this.totals(g.rows)}`)))
       .when(!!this.busy[name] || (!!op && op.failed == null), (el) => el.child(svg(icon("spinner")).size(12).flex_none().text_color(t.working).spin(900)))
       .when(g.rows.some((r) => r.container), (el) => el.child(this.iconButton(t, `logs-${id}`, "logs", "Logs of every Service, in time order", () => this.openLogs(`Logs · ${name}`, name, g.stack.machine, g.rows, null), t.dim)))
+      .child(this.iconButton(t, `disk-${id}`, "disk", "Disk: what this Stack and Docker hold, and a clean-up", () => {
+        openOverlay({ mod: "dockr", kind: "dialog", width: 560, height: 600, props: { disk: { stack: name, machine: g.stack.machine ?? null } } });
+      }, t.dim))
       .when(down, (el) => el.child(this.button(t, `up-${id}`, "Up", async (cx) => this.runOp(cx, await this.store.prepareStack(name, "up")), { primary: true, tip: "Start every Service that is not running" })))
       .when(g.running > 0, (el) => el.child(this.iconButton(t, `down-${id}`, "power", "Down: stop and remove the containers. Volumes are kept.", () => this.askDown(name), t.dim)));
     const out = v_flex().w_full().child(head);
@@ -646,6 +653,7 @@ export default class Dockr extends View {
     if (this.picking) return this.renderPicker(t);
     if (this.diagnosing) return diagnose.render(this, t);
     if (this.logging) return logs.render(this, t);
+    if (this.disking) return disk.render(this, t);
     return this.renderPanel(t, cx);
   }
 }

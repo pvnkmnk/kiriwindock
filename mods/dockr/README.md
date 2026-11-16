@@ -58,7 +58,13 @@ Each row is one service: a status mark, its program's icon, its name and the bra
 - **Back to <branch>.** After a Switch, one button in the note line puts the old checkout back.
 - **Use <ticket>?** When the pane you are in is on a branch that a service has a worktree for, the row offers it. Nothing switches without your click.
 - **drift.** The service runs from a different checkout than the Stack is set to, because compose was run by hand. Click the chip to bring it back.
-- **Click a row** for its image, state, paths and ports. Port numbers and link chips open in the browser.
+- **When a container fails.** The row says why (`exited 137, out of memory`, `health check: connection refused`) and shows its last three log lines. Three exits inside a minute show as `restart loop`, with one toast.
+- **Diagnose.** On a failed row. It shows the exact text an agent will get: what Docker reports and the last 100 log lines, with no environment values. Read the log lines first, since a program can print a secret. `Send` starts the agent you pick in a new tab, in the space on that branch when there is one.
+- **Logs.** The log icon on a row opens a window for that service. The one in the Stack header opens every service in one stream, in time order, with a toggle per service. Type to search (`/regex/` works), Enter or F3 for the next match, `Time` for timestamps, `Follow` or End to stay at the newest line. Errors are red and warnings amber. The window keeps the last 5,000 lines, and `Open in terminal` gives the raw tail.
+- **CPU and memory.** Each running row shows them while the panel is visible, the Stack header shows the totals, and an opened row shows the last 60 samples. A sample arrives about every two seconds.
+- **rebuild needed.** The dependency files in the checkout differ from the ones in the image. Click the chip to rebuild. It is checked when the panel shows, on Reload and when containers change.
+- **Disk.** The disk icon in the Stack header lists the Stack's images and volumes and what the whole engine holds. `Clean up` removes the images the Stack's rebuilds left behind and, when ticked, other untagged images and unused build cache. It shows what it will remove first and never removes a volume.
+- **Click a row** for its image, state, paths, ports, mounts, networks, labels and the names of its environment variables. Dockr never reads their values. Port numbers and link chips open in the browser.
 - **Stack header.** One bar segment per service, `Up` when something is not running, and a power icon for Down, which asks first and never removes volumes.
 - Builds, log tails and shells run in background terminals. Closing the view leaves them running. `Keep as tab` gives one a tab.
 
@@ -70,6 +76,8 @@ A compose command run by hand does not load `.dockr.env`, so it builds from the 
 
 ## Limits
 
+- `rebuild needed` covers services with a bind mount. For one without, Dockr cannot tell that its checkout changed since the build.
+- On engines that drop the old image when compose rebuilds (Docker Desktop's containerd image store does), "left behind by rebuilds" stays at 0. The space is in the build cache and in untagged images.
 - A service with no bind mount shows `unknown` until Dockr itself builds it, because Docker does not record which folder an image was built from.
 - Differences outside `src` other than the manifests are not detected. Use Rebuild.
 - Dockr waits on `docker events` for changes. If that wait cannot run on a Machine, a warning says so and Reload is the way to refresh.

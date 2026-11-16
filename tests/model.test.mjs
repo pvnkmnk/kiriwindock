@@ -392,3 +392,17 @@ test("parseStats, addStats, size and usage", () => {
   h = m.addStats(h, { "p-web-1": { cpu: 4, mem: 1 } }, 2);
   assert.deepEqual(h["p-web-1"].map((x) => x.cpu), [3, 4]);
 });
+
+test("parseDisk reads the engine totals, the Stack's unused images and its volumes", () => {
+  const text = ["Images|91|58.84GB|28.31GB (48%)", "Containers|6|160.5MB|0B (0%)", "Local Volumes|7|2.783GB|2.319GB (83%)", "Build Cache|455|68.58GB|21.23GB", "---",
+    "p-web:latest|1.15GB", "---", "abc123|2GB|4 weeks ago", "def456|1GB|2 days ago", "---", "abc123|2GB", "def456|1GB", "zzz999|4GB", "---", "p_data", "---", "p_data|642.1MB|1", "other|1GB|0", ""].join("\n");
+  const d = m.parseDisk(text);
+  assert.equal(d.engine.images.count, 91);
+  assert.equal(m.size(d.engine.images.reclaimable), "26.4G"); // 28.31 GB in powers of ten
+  assert.equal(d.engine.cache.count, 455);
+  assert.deepEqual(d.images.map((i) => i.name), ["p-web:latest"]);
+  assert.deepEqual(d.unused.map((u) => u.id), ["abc123", "def456"]);
+  assert.equal(d.allUnused.count, 3);
+  assert.deepEqual(d.volumes.map((v) => [v.name, v.used]), [["p_data", true]]);
+  assert.deepEqual(m.parseDisk("").unused, []);
+});

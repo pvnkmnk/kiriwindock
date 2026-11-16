@@ -128,6 +128,46 @@ export async function waitStats(machine) {
   return r.code === 0 ? { text: r.stdout } : { error: said(r) };
 }
 
+// $1: the compose project. Sections are separated by "---".
+const DISK = `
+docker system df --format '{{.Type}}|{{.TotalCount}}|{{.Size}}|{{.Reclaimable}}' || exit 1
+echo ---
+docker image ls --filter dangling=false --filter "label=com.docker.compose.project=$1" --format '{{.Repository}}:{{.Tag}}|{{.Size}}'
+echo ---
+docker image ls --filter dangling=true --filter "label=com.docker.compose.project=$1" --format '{{.ID}}|{{.Size}}|{{.CreatedSince}}'
+echo ---
+docker image ls --filter dangling=true --format '{{.ID}}|{{.Size}}'
+echo ---
+docker volume ls --filter "label=com.docker.compose.project=$1" --format '{{.Name}}'
+echo ---
+docker system df -v --format '{{range .Volumes}}{{.Name}}|{{.Size}}|{{.Links}}{{println}}{{end}}'
+`;
+
+/** What Docker's disk holds for a compose project and for the whole engine: { text } or { error }. Takes several seconds. */
+export async function disk(machine, project) {
+  const r = await exec("sh", ["-c", DISK, "dockr", project], { ...on(machine), timeout: 120000 }).catch(failed);
+  return r.code === 0 ? { text: r.stdout } : { error: explain(r.stderr || r.stdout, machine) };
+}
+
+/**
+ * Removes unused images and, when asked, unused build cache. Volumes are never touched.
+ * `images`: ids to remove. `allUnused`: every untagged image no container uses. `cache`: unused build cache.
+ * Resolves the lines that say what happened.
+ */
+export async function cleanUp(machine, { images = [], allUnused = false, cache = false }) {
+  const said = [];
+  const step = async (label, args) => {
+    const r = await exec("docker", args, { ...on(machine), timeout: 600000 }).catch(failed);
+    const text = (r.stderr || r.stdout).trim().split(/\r?\n/);
+    const freed = text.find((l) => /reclaimed space/i.test(l));
+    said.push(r.code === 0 ? `${label}: ${freed ?? "done"}` : `${label}: ${explain(r.stderr || r.stdout, machine)}`);
+  };
+  if (images.length) await step(`${images.length} unused image${images.length === 1 ? "" : "s"} of this Stack`, ["image", "rm", ...images]);
+  if (allUnused) await step("Other unused images", ["image", "prune", "-f"]);
+  if (cache) await step("Unused build cache", ["builder", "prune", "-f"]);
+  return said;
+}
+
 /** A Repo's checkouts, the Main checkout first. Empty when git fails there. */
 export async function worktrees(machine, main) {
   const r = await exec("git", ["-C", main, "worktree", "list", "--porcelain"], on(machine)).catch(failed);

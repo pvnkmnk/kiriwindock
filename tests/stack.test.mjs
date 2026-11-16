@@ -290,6 +290,31 @@ test("a failing action exits with its code and labels its terminal", opts, async
   assert.equal(run(op).status, 7);
 });
 
+test("Clean up removes the images a rebuild left behind and keeps the volume", opts, async () => {
+  const volume = `${NAME}_keep`;
+  sh(root, "docker", "volume", "create", "--label", `com.docker.compose.project=${NAME}`, volume);
+  try {
+    const read = async () => { const r = await docker.disk(null, NAME); assert.equal(r.error, undefined); return model.parseDisk(r.text); };
+    // An untagged image with the Stack's label: what a rebuild leaves on engines that keep the old image.
+    const ctx = join(root, "left");
+    mkdirSync(ctx);
+    writeFileSync(join(ctx, "Dockerfile"), "FROM busybox:1.36\nRUN echo left > /left\n");
+    sh(ctx, "docker", "build", "-q", "--label", `com.docker.compose.project=${NAME}`, ".");
+    const d = await read();
+    assert.ok(d.engine.images.count > 0);
+    assert.ok(d.images.length > 0, "the Stack's own images are listed");
+    assert.equal(d.unused.length, 1);
+    assert.ok(d.allUnused.count >= 1);
+    assert.deepEqual(d.volumes.map((v) => v.name), [volume]);
+    const said = await docker.cleanUp(null, { images: d.unused.map((u) => u.id) });
+    assert.equal(said.length, 1);
+    const after = await read();
+    assert.deepEqual(after.unused, []);
+    assert.deepEqual(after.volumes.map((v) => v.name), [volume]);
+    assert.equal(after.images.length, d.images.length);
+  } finally { spawnSync("docker", ["volume", "rm", volume], { stdio: "ignore" }); }
+});
+
 test("Down stops and removes the containers and keeps .dockr.env", opts, async () => {
   const op = await store.prepareStack(NAME, "down");
   assert.equal(run(op).status, 0);

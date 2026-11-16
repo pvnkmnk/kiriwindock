@@ -634,3 +634,26 @@ export function addStats(history, sample, keep = 60) {
 
 /** CPU percent and memory as a row shows them: "24% · 236M". */
 export const usage = (s) => (s ? `${s.cpu >= 10 ? Math.round(s.cpu) : s.cpu.toFixed(1)}% · ${size(s.mem)}` : "");
+
+/**
+ * Docker's disk use from docker.disk()'s text: engine totals, the Stack's images, the untagged
+ * images its rebuilds left, every untagged image on the engine, and the Stack's volumes.
+ */
+export function parseDisk(text) {
+  const [totals = "", images = "", unused = "", all = "", names = "", sizes = ""] = String(text ?? "").split(/^---$/m).map((x) => x.trim());
+  const rows = (t) => t.split(/\r?\n/).map((l) => l.trim().split("|")).filter((f) => f[0]);
+  const engine = {};
+  for (const [type, count, size, reclaim] of rows(totals)) {
+    const key = /image/i.test(type) ? "images" : /volume/i.test(type) ? "volumes" : /cache/i.test(type) ? "cache" : /container/i.test(type) ? "containers" : null;
+    if (key) engine[key] = { count: Number(count) || 0, size: bytes(size), reclaimable: bytes(String(reclaim ?? "").split(" ")[0]) };
+  }
+  const sizeOf = Object.fromEntries(rows(sizes).map(([name, size, links]) => [name, { size: bytes(size), used: Number(links) > 0 }]));
+  const allRows = rows(all);
+  return {
+    engine,
+    images: rows(images).map(([name, size]) => ({ name, size: bytes(size) })),
+    unused: rows(unused).map(([id, size, age]) => ({ id, size: bytes(size), age: age ?? "" })),
+    allUnused: { count: allRows.length, size: allRows.reduce((n, f) => n + bytes(f[1]), 0) },
+    volumes: rows(names).map(([name]) => ({ name, size: sizeOf[name]?.size ?? 0, used: !!sizeOf[name]?.used })),
+  };
+}

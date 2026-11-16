@@ -49,6 +49,13 @@ The mark shows how many containers run and turns red when one has failed. It wat
 
 The dialog is a list of containers, grouped the way Docker Desktop groups them: one group per compose project, then the containers in none. No config is needed for that. A project listed in `dockr.json` also gets the checkout picker.
 
+**The dashboard** (the second tab, or `2`; `1` returns to the list)
+- Totals: containers running, CPU, memory, network and disk in and out.
+- CPU and memory in all over the last minutes, as bars. A sample arrives about every two seconds, only while the dialog is open, so the history starts when you open it.
+- "Needs a look": containers that failed, were killed for memory, sit at 90% of their memory limit or keep restarting.
+- One line per group, then every container with its CPU, memory, network, disk, restart count and uptime. Click `CPU` or `Memory`, or press `s`, to sort. A click on a container opens it.
+- Docker's disk use for the whole engine, read once when the tab first shows and again on Refresh.
+
 **The toolbar**
 - **Search** filters by name, image, branch or published port. `Running` hides everything that is not running.
 - The refresh icon reads Docker, the worktrees and `dockr.json` again.

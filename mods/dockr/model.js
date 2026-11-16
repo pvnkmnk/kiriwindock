@@ -770,3 +770,72 @@ export function keyHints(item, facts = {}) {
   all.push(["/", "search"], ["q", "leave"]);
   return all.filter(([, what]) => what);
 }
+
+// The dashboard
+
+/** Docker's "1.2MB / 340kB" as [in, out] bytes. */
+export function pair(text) {
+  const [a, b] = String(text ?? "").split("/").map((x) => bytes(x.trim()));
+  return [a || 0, b || 0];
+}
+
+/** How long ago `iso` was, as "45s", "12m", "3h" or "2d". Empty when it is not a time. */
+export function ago(iso, now = Date.now()) {
+  const at = new Date(iso).getTime();
+  if (Number.isNaN(at) || at <= 0) return "";
+  const s = Math.max(0, Math.round((now - at) / 1000));
+  return s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`;
+}
+
+/**
+ * What the dashboard shows, from the panel's groups and the stats history ({ container name: samples }).
+ * `statusOf_` says whether a container has failed. `sort`: "cpu" or "mem", highest first.
+ * - totals: containers running and in all, CPU percent, memory, the engine's memory, network and disk bytes
+ * - groups: one line per group with its CPU and memory
+ * - rows: one per created container
+ * - attention: the containers to look at, each with why
+ * - history: total CPU and memory per sample, oldest first
+ */
+export function dashboard(groups, stats, statusOf_ = statusOf, sort = "cpu", now = Date.now()) {
+  const rows = [], perGroup = [];
+  for (const g of groups) {
+    let cpu = 0, mem = 0, running = 0, total = 0;
+    for (const r of g.rows) {
+      const c = r.container;
+      if (!c) continue;
+      total++;
+      const up = c.state === "running", samples = stats[c.name] ?? [], s = up ? samples[samples.length - 1] ?? null : null;
+      const [netIn, netOut] = pair(s?.net), [diskIn, diskOut] = pair(s?.disk), status = statusOf_(c);
+      if (up) running++;
+      cpu += s?.cpu ?? 0;
+      mem += s?.mem ?? 0;
+      rows.push({
+        key: r.key, row: r, name: r.name, group: g.name ?? "", running: up, sampled: !!s, cpu: s?.cpu ?? 0, mem: s?.mem ?? 0, limit: s?.limit ?? 0,
+        memPct: s?.limit ? (s.mem / s.limit) * 100 : 0, netIn, netOut, diskIn, diskOut, restarts: c.restarts ?? 0,
+        up: up ? ago(c.startedAt, now) : "", bad: status.kind === "bad", status: status.text, oom: !!c.oom,
+      });
+    }
+    if (total) perGroup.push({ key: g.key, name: g.name ?? "No project", running, total, cpu, mem });
+  }
+  const sum = (f) => rows.reduce((n, r) => n + f(r), 0);
+  const totals = {
+    running: rows.filter((r) => r.running).length, total: rows.length, cpu: sum((r) => r.cpu), mem: sum((r) => r.mem),
+    limit: Math.max(0, ...rows.map((r) => r.limit)), netIn: sum((r) => r.netIn), netOut: sum((r) => r.netOut), diskIn: sum((r) => r.diskIn), diskOut: sum((r) => r.diskOut),
+  };
+  const attention = [];
+  for (const r of rows) {
+    const why = r.bad ? r.status : r.oom ? "killed for memory" : r.memPct >= 90 ? `memory at ${Math.round(r.memPct)}% of its limit` : r.restarts >= 3 && r.running ? `restarted ${r.restarts} times` : "";
+    if (why) attention.push({ key: r.key, row: r.row, name: r.name, why, bad: r.bad || r.oom });
+  }
+  const names = rows.filter((r) => r.running).map((r) => r.row.container.name);
+  const length = Math.max(0, ...names.map((n) => (stats[n] ?? []).length));
+  const history = { cpu: [], mem: [] };
+  for (let back = length; back >= 1; back--) {
+    let cpu = 0, mem = 0;
+    for (const n of names) { const list = stats[n] ?? [], s = list[list.length - back]; if (s) { cpu += s.cpu; mem += s.mem; } }
+    history.cpu.push(cpu);
+    history.mem.push(mem);
+  }
+  rows.sort((a, b) => (sort === "mem" ? b.mem - a.mem : b.cpu - a.cpu) || a.name.localeCompare(b.name));
+  return { totals, groups: perGroup, rows, attention, history };
+}

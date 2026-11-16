@@ -16,6 +16,7 @@ import * as diagnose from "./diagnose.js";
 import * as logs from "./logs.js";
 import * as disk from "./disk.js";
 import * as menu from "./menu.js";
+import * as dashboard from "./dashboard.js";
 import { legend } from "./kit/legend.js";
 import { assignLetters, letterBadge, navigateByLetter } from "./kit/letters.js";
 
@@ -63,6 +64,9 @@ export default class Dockr extends View {
     this.search.on("blur", (_e, cx) => { this.typing = false; cx.notify(); });
     this.search.on("submit", (_e, cx) => { this.enterKeys(); cx.notify(); });
     this.typing = false;       // the search box has the keyboard
+    this.tab = localStorage.getItem("tab") === "dash" ? "dash" : "list"; // the list of containers, or the dashboard
+    this.dashSort = localStorage.getItem("dashSort") === "mem" ? "mem" : "cpu";
+    this.dashDisk = null;      // Docker's disk use, read once when the dashboard first shows
     this.help = false;         // every key is listed, after "?"
     this.kb = false;           // the panel has the keyboard, asked of its focus handle at each render: letters, selection and the legend show
     this.sel = null;           // the selected item's key
@@ -106,6 +110,7 @@ export default class Dockr extends View {
   async reload(cx) {
     this.note = "";
     this.undo = null;
+    this.dashDisk = null;
     this.statsOff.clear();
     this.post(await this.store.reload());
     for (const m of this.store.machines()) this.watch(cx, m);
@@ -215,12 +220,23 @@ export default class Dockr extends View {
     return { ...group, running: c?.state === "running", created: !!c, service: !!r.service, bad: !!c && this.store.status(c).kind === "bad", link: !!this.links[r.key] };
   }
 
+  setTab(tab) { this.tab = tab; this.help = false; localStorage.setItem("tab", tab); }
+
   panelKey(e, cx) {
     if (this.typing) {
       if (e.key === "escape") { this.enterKeys(); cx.stop_propagation(); cx.notify(); }
       return;
     }
     if (!this.kb) return;
+    if (!(e.modifiers.control || e.modifiers.alt || e.modifiers.platform)) {
+      if (e.key === "1" || e.key === "2") { this.setTab(e.key === "2" ? "dash" : "list"); cx.stop_propagation(); cx.notify(); return; }
+      if (this.tab === "dash") {
+        if (e.key === "q") this.leaveKeys();
+        else if (e.key === "s") { this.dashSort = this.dashSort === "mem" ? "cpu" : "mem"; localStorage.setItem("dashSort", this.dashSort); }
+        else return;
+        cx.stop_propagation(); cx.notify(); return;
+      }
+    }
     const items = this.items;
     const state = { at: Math.max(0, items.findIndex((i) => i.key === this.sel)), typed: this.typed };
     const nav = navigateByLetter(state, e, items);
@@ -751,7 +767,8 @@ export default class Dockr extends View {
     if (!this.store.stacks.length && !this.store.problems.length && Object.keys(this.store.byMachine).length) {
       body.child(div().px(12).pt(10).text_size(11).text_color(t.dim).child("To pick the branch or worktree each service runs from, list its compose project in dockr.json. The README shows how."));
     }
-    const undo = this.undo;
+    const undo = this.undo, dash = this.tab === "dash";
+    if (dash) dashboard.loadDisk(this, cx);
 
     return v_flex().id("dockr").track_focus(this.handle).size_full().min_h(0).overflow_hidden().bg(t.background).when(!this.modal, (el) => el.rounded(10).border_1().border_color(this.kb ? t.accent : t.border)).text_color(t.foreground).text_size(12.5)
       .on_key_down((e, cx) => this.panelKey(e, cx))
@@ -766,6 +783,11 @@ export default class Dockr extends View {
           .on_click((_e, cx) => { this.onlyRunning = !this.onlyRunning; localStorage.setItem("running", this.onlyRunning ? "1" : "0"); cx.notify(); })
           .child(h_flex().h_full().items_center().child("Running")))
         .child(this.iconButton(t, "reload", "restart", "Refresh: read Docker, the worktrees and dockr.json again", (cx) => this.reload(cx))))
+      .child(h_flex().w_full().h(30).px(10).gap(4).flex_none().items_end().border_b(1).border_color(t.border).children(
+        [["list", "Containers", "1"], ["dash", "Dashboard", "2"]].map(([id, label, key]) => h_flex().id(`tab-${id}`).h(30).px(10).gap(6).items_center().cursor_pointer()
+          .border_b(2).border_color(this.tab === id ? t.accent : "#00000000").text_color(this.tab === id ? t.foreground : t.muted).hover((x) => x.text_color(t.foreground))
+          .on_click((_e, cx) => { this.setTab(id); cx.notify(); })
+          .child(div().font_semibold().child(label)).when(this.kb, (x) => x.child(div().text_size(10.5).text_color(t.dim).child(key))))))
       .when(warnings.length > 0, (el) => el.child(
         div().w_full().flex_none().px(10).py(5).text_size(11).text_color(t.ansi3).bg(t.raised).tooltip(warnings.join("\n"))
           .child(warnings.length === 1 ? warnings[0] : `${warnings.length} problems. ${warnings[0]}`)))
@@ -779,9 +801,11 @@ export default class Dockr extends View {
           }, { tip: "Undo the last Switch" })))
           .child(div().id("note-close").flex_none().px(5).py(1).rounded(4).cursor_pointer().hover((x) => x.bg(t.raised)).tooltip("Dismiss").child("✕")
             .on_click((_e, cx) => { this.note = ""; this.undo = null; cx.notify(); }))))
-      .child(body)
-      .when(this.kb && this.help && !this.typing, (el) => el.child(this.renderKeys(t, model.keyHints(current, this.facts(current)))))
-      .when(this.kb && !(this.help && !this.typing), (el) => el.child(div().w_full().flex_none().px(12).py(8).border_t(1).border_color(t.border)
+      .child(dash ? dashboard.render(this, t, groups) : body)
+      .when(dash && this.kb, (el) => el.child(div().w_full().flex_none().px(12).py(8).border_t(1).border_color(t.border)
+        .child(legend(t, [["1", "containers"], ["s", this.dashSort === "mem" ? "sort by CPU" : "sort by memory"], ["q", this.modal ? "close" : "leave"]]))))
+      .when(!dash && this.kb && this.help && !this.typing, (el) => el.child(this.renderKeys(t, model.keyHints(current, this.facts(current)))))
+      .when(!dash && this.kb && !(this.help && !this.typing), (el) => el.child(div().w_full().flex_none().px(12).py(8).border_t(1).border_color(t.border)
         .child(legend(t, this.typing ? [["enter", "back to the list"], ["esc", this.modal ? "close" : "back to the list"]] : model.coreHints(current, this.facts(current))))));
   }
 

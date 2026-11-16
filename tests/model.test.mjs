@@ -476,3 +476,23 @@ test("panelItems, keyAction and keyHints follow the run mod's keys", () => {
   assert.equal(act("?", row, up), "panel:help");
   assert.equal(act("shift-/", null), "panel:help");
 });
+
+test("the dashboard sums what the stats say and names what needs a look", () => {
+  const c = (name, over = {}) => ({ name, state: "running", restarts: 0, oom: false, startedAt: new Date(10_000_000 - 7_200_000).toISOString(), ...over });
+  const groups = [
+    { key: "stack:a", name: "a", rows: [{ key: "a/web", name: "web", container: c("a-web-1") }, { key: "a/db", name: "db", container: c("a-db-1") }, { key: "a/new", name: "new", container: null }] },
+    { key: "loose", name: null, rows: [{ key: "x", name: "x", container: c("x", { state: "exited", exitCode: 2 }) }] },
+  ];
+  const s = (cpu, mem, limit = 1000) => ({ cpu, mem, limit, net: "1kB / 2kB", disk: "0B / 3MB" });
+  const stats = { "a-web-1": [s(10, 100), s(30, 200)], "a-db-1": [s(5, 950)], x: [s(99, 99)] };
+  const status = (k) => (k.state === "exited" ? { kind: "bad", text: "exited 2" } : { kind: "up", text: "" });
+  const d = m.dashboard(groups, stats, status, "cpu", 10_000_000);
+  assert.deepEqual([d.totals.running, d.totals.total, d.totals.cpu, d.totals.mem, d.totals.limit], [2, 3, 35, 1150, 1000]);
+  assert.deepEqual([d.totals.netIn, d.totals.netOut, d.totals.diskOut], [2000, 4000, 6e6]);
+  assert.deepEqual(d.groups.map((g) => [g.name, g.running, g.total, g.cpu]), [["a", 2, 2, 35], ["No project", 0, 1, 0]]);
+  assert.deepEqual(d.rows.map((r) => r.name), ["web", "db", "x"]);
+  assert.equal(d.rows[0].up, "2h");
+  assert.deepEqual(m.dashboard(groups, stats, status, "mem").rows.map((r) => r.name), ["db", "web", "x"]);
+  assert.deepEqual(d.attention.map((a) => [a.name, a.why]), [["db", "memory at 95% of its limit"], ["x", "exited 2"]]);
+  assert.deepEqual(d.history, { cpu: [10, 35], mem: [100, 1150] });
+});

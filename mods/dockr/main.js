@@ -3,7 +3,7 @@
 // from waiting on `docker events`, and files are read when the panel shows and before each action.
 //
 // Faces, chosen by props: the panel, the Source picker (a popup), the bar over a peeked terminal
-// and the Diagnose dialog (diagnose.js).
+// the Diagnose dialog (diagnose.js) and the log window (logs.js).
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
@@ -12,6 +12,7 @@ import * as model from "./model.js";
 import * as docker from "./docker.js";
 import { Store } from "./store.js";
 import * as diagnose from "./diagnose.js";
+import * as logs from "./logs.js";
 
 const icon = (name) => `mods/dockr/icons/${name}.svg`;
 const REQUEST = "dockr.request"; // the picker's ask, handed to the panel through shared state
@@ -28,6 +29,8 @@ export default class Dockr extends View {
     if (this.picking) return this.initPicker(cx);
     this.diagnosing = props()?.diagnose ?? null;
     if (this.diagnosing) return diagnose.init(this, cx);
+    this.logging = props()?.logs ?? null;
+    if (this.logging) return logs.init(this, cx);
 
     this.store = new Store(load("built", {}), (built) => localStorage.setItem("built", JSON.stringify(built)));
     this.watching = new Set(); // machines with an event wait running
@@ -49,6 +52,7 @@ export default class Dockr extends View {
       for (;;) {
         const c = await nextCommand();
         if (c === "reload") await this.reload(cx);
+        else if (c === "logs") { const g = this.store.view().groups[0]; if (g) this.openLogs(`Logs · ${g.stack.name}`, g.stack.name, g.stack.machine, g.rows, null); }
         else if (c === "downConfirmed" && this.pendingDown) { const name = this.pendingDown; this.pendingDown = null; await this.runOp(cx, await this.store.prepareStack(name, "down")); }
         cx.notify();
       }
@@ -139,6 +143,18 @@ export default class Dockr extends View {
     finally { delete this.busy[row.key]; cx.notify(); }
   }
 
+  /** Opens the log window for one container, or for every container of a Stack. */
+  openLogs(title, key, machine, rows, terminal) {
+    const sources = rows.filter((r) => r.container).map((r) => ({ name: r.container.name, label: r.name }));
+    if (!sources.length) { this.note = "Nothing has been created yet, so there are no logs."; return; }
+    openOverlay({ mod: "dockr", kind: "window", key: `dockr-logs-${idOf(key)}`, width: 1100, height: 680, props: { logs: { title, machine: machine ?? null, sources, terminal } } });
+  }
+
+  rowLogs(r) {
+    const stack = r.stack ? this.store.stack(r.stack) : null;
+    this.openLogs(`Logs · ${r.name}`, r.key, stack ? stack.machine : this.store.machineOf(r.container), [r], stack ? { stack: r.stack, service: r.name } : null);
+  }
+
   async tail(cx, row, kind) {
     const live = this.ops().find((o) => o.stack === row.stack && o.kind === kind && o.service === row.name);
     if (live) return this.peek(live.address, live.title, true);
@@ -193,10 +209,15 @@ export default class Dockr extends View {
     const req = shared(REQUEST);
     if (!req?.n || req.n === this.seenRequest) return;
     this.seenRequest = req.n;
-    this.startStopped = !!req.start;
-    localStorage.setItem("start", this.startStopped ? "1" : "0");
+    if (req.kind !== "tail") {
+      this.startStopped = !!req.start;
+      localStorage.setItem("start", this.startStopped ? "1" : "0");
+    }
     cx.spawn(async (cx) => {
-      if (req.kind === "rebuild") {
+      if (req.kind === "tail") {
+        const row = this.store.rows(req.stack).find((r) => r.name === req.service);
+        if (row) await this.tail(cx, row, "logs");
+      } else if (req.kind === "rebuild") {
         const row = this.store.rows(req.stack).find((r) => r.name === req.service);
         if (row) await this.runOp(cx, await this.store.prepareRebuild(row));
       } else await this.doSwitch(cx, req.stack, req.targets, req.start, req.title);
@@ -313,7 +334,7 @@ export default class Dockr extends View {
       else acts.child(this.iconButton(t, `start-${id}`, "play", c ? "Start" : "Create and start", (cx) => this.quick(cx, r, c ? ["start"] : ["up", "-d"], "starting")));
       if (running) acts.child(this.iconButton(t, `restart-${id}`, "restart", "Restart", (cx) => this.quick(cx, r, ["restart"], "restarting")));
       if (r.service) acts.child(this.iconButton(t, `rebuild-${id}`, "rebuild", "Rebuild the image from the Source it is set to", async (cx) => this.runOp(cx, await this.store.prepareRebuild(r))));
-      if (c) acts.child(this.iconButton(t, `logs-${id}`, "logs", "Logs", (cx) => this.tail(cx, r, "logs")));
+      if (c) acts.child(this.iconButton(t, `logs-${id}`, "logs", "Logs", () => this.rowLogs(r)));
       if (running) acts.child(this.iconButton(t, `shell-${id}`, "shell", "Shell", (cx) => this.tail(cx, r, "shell")));
       head.child(acts);
     } else if (busy) {
@@ -341,7 +362,7 @@ export default class Dockr extends View {
         .children(lines.map((l) => div().w_full().truncate().tooltip(l).child(l)))))
       .child(h_flex().w_full().gap(5)
         .child(this.button(t, `diag-${id}`, "Diagnose", (cx) => this.openDiagnose(cx, r), { tip: "Show what an agent would be told about this failure, then send it" }))
-        .child(this.button(t, `faillogs-${id}`, "Logs", (cx) => this.tail(cx, r, "logs"), { dim: true })));
+        .child(this.button(t, `faillogs-${id}`, "Logs", () => this.rowLogs(r), { dim: true })));
   }
 
   /** What the row has no room for. Actions are on the row itself. */
@@ -392,6 +413,7 @@ export default class Dockr extends View {
           div().w(9).h(4).rounded(2).bg(this.statusColor(t, this.store.status(r.container).kind)))))
         .child(div().flex_none().text_size(11).text_color(t.dim).child(`${g.running} up${g.stack.machine ? ` · ${g.stack.machine}` : ""}`)))
       .when(!!this.busy[name] || (!!op && op.failed == null), (el) => el.child(svg(icon("spinner")).size(12).flex_none().text_color(t.working).spin(900)))
+      .when(g.rows.some((r) => r.container), (el) => el.child(this.iconButton(t, `logs-${id}`, "logs", "Logs of every Service, in time order", () => this.openLogs(`Logs · ${name}`, name, g.stack.machine, g.rows, null), t.dim)))
       .when(down, (el) => el.child(this.button(t, `up-${id}`, "Up", async (cx) => this.runOp(cx, await this.store.prepareStack(name, "up")), { primary: true, tip: "Start every Service that is not running" })))
       .when(g.running > 0, (el) => el.child(this.iconButton(t, `down-${id}`, "power", "Down: stop and remove the containers. Volumes are kept.", () => this.askDown(name), t.dim)));
     const out = v_flex().w_full().child(head);
@@ -561,6 +583,7 @@ export default class Dockr extends View {
     if (this.peeked) return this.renderBar(t);
     if (this.picking) return this.renderPicker(t);
     if (this.diagnosing) return diagnose.render(this, t);
+    if (this.logging) return logs.render(this, t);
     return this.renderPanel(t, cx);
   }
 }

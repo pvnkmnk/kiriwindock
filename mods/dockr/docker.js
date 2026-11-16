@@ -70,6 +70,46 @@ export async function waitEvent(machine, since) {
   return { event: true, since: `${next.slice(0, -9)}.${next.slice(-9)}` };
 }
 
+// $1: container name, $2: the timestamp to continue from ("" starts with a tail), $3: the longest
+// wait in seconds, $4: how many lines the first call starts with. Prints the new lines with their
+// timestamps as soon as some arrive (at most 0.4 s of them), then "\001ended" when the stream ended.
+const LOGS = `
+c="$1"; since="$2"; max="$3"; tail="$4"
+set -- docker logs -f --timestamps
+if [ -n "$since" ]; then set -- "$@" --since "$since"; else set -- "$@" --tail "$tail"; fi
+coproc D { exec "$@" "$c" 2>&1; }
+n=0
+IFS= read -r -t "$max" line <&"\${D[0]}"; rc=$?
+if [ $rc -eq 0 ]; then
+  printf '%s\\n' "$line"; n=1; end=$(( \${EPOCHREALTIME//[.,]/} + 400000 ))
+  while [ $n -lt 4000 ] && [ \${EPOCHREALTIME//[.,]/} -lt $end ]; do
+    IFS= read -r -t 0.15 line <&"\${D[0]}"; rc=$?
+    [ $rc -eq 0 ] || break
+    printf '%s\\n' "$line"; n=$((n+1))
+  done
+fi
+kill "$D_PID" 2>/dev/null
+[ $rc -eq 1 ] && printf '\\001ended\\n'
+exit 0
+`;
+
+/**
+ * Waits for a container's next log lines, at most a minute. Resolves { text } with the new lines
+ * (each starts with its timestamp, and a last line "\x01ended" says the container stopped writing),
+ * or { error } when the wait could not run.
+ */
+export async function waitLogs(machine, name, since, tail = 300) {
+  const r = await exec("bash", ["-c", LOGS, "dockr", name, since ?? "", "60", String(tail)], { ...on(machine), timeout: 90000 }).catch(failed);
+  return r.code === 0 ? { text: r.stdout } : { error: said(r) };
+}
+
+/** Waits until a container of that name starts, at most ten minutes: { started } or { error }. */
+export async function waitStart(machine, name) {
+  const script = 'coproc D { exec docker events --filter type=container --filter event=start --filter "container=$1" --format x 2>/dev/null; }; IFS= read -r -t 570 l <&"${D[0]}" && echo started; kill "$D_PID" 2>/dev/null; exit 0';
+  const r = await exec("bash", ["-c", script, "dockr", name], { ...on(machine), timeout: 600000 }).catch(failed);
+  return r.code === 0 ? { started: r.stdout.includes("started") } : { error: said(r) };
+}
+
 /** A Repo's checkouts, the Main checkout first. Empty when git fails there. */
 export async function worktrees(machine, main) {
   const r = await exec("git", ["-C", main, "worktree", "list", "--porcelain"], on(machine)).catch(failed);

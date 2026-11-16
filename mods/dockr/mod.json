@@ -3,6 +3,7 @@
   "title": "Dockr",
   "palette": [
     { "title": "Dockr: Toggle", "command": "layout.toggle", "args": { "id": "dockr" }, "about": "Show or hide the Dockr panel (ctrl-shift-d)" },
-    { "title": "Dockr: Reload", "command": "dockr.reload", "about": "Read dockr.json, the worktrees and Docker again" }
+    { "title": "Dockr: Reload", "command": "dockr.reload", "about": "Read dockr.json, the worktrees and Docker again" },
+    { "title": "Dockr: Stack logs", "command": "dockr.logs", "about": "Every Service's log lines in one window, in time order" }
   ]
 }

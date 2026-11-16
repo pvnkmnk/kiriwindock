@@ -131,6 +131,28 @@ test("a container that fails says why, with its last lines", opts, async () => {
   await look();
 });
 
+test("the log wait returns new lines without losing or repeating any, and says when the container stops", opts, async () => {
+  const name = `${NAME}-chatty`;
+  sh(root, "docker", "run", "-d", "--name", name, "busybox:1.36", "sh", "-c", "i=0; while [ $i -lt 3000 ]; do i=$((i+1)); echo line $i; [ $((i % 500)) -eq 0 ] && sleep 0.3; done");
+  try {
+    let all = [], since = "", ended = false;
+    for (let k = 0; k < 60 && !ended; k++) {
+      const r = await docker.waitLogs(null, name, since, 100000);
+      assert.equal(r.error, undefined);
+      const got = model.parseLogs(r.text, "chatty");
+      all = model.addLogs(all, got.lines, since, 100000);
+      for (const l of got.lines) if (l.at > since) since = l.at;
+      ended = got.ended;
+    }
+    assert.equal(ended, true);
+    assert.deepEqual(all.map((l) => l.text), Array.from({ length: 3000 }, (_, i) => `line ${i + 1}`));
+    const wait = docker.waitStart(null, name);
+    spawnSync("sleep", ["1"]);
+    sh(root, "docker", "start", name);
+    assert.equal((await wait).started, true);
+  } finally { spawnSync("docker", ["rm", "-f", name], { stdio: "ignore" }); }
+});
+
 test("costs says which checkouts need a rebuild before anything is switched", opts, async () => {
   const r = row("web");
   const costs = await store.costs(store.stack(NAME), { sources: r.sources, runs: r.actual.path, mounted: r.mounted, image: r.container.image, manifests: r.service.manifests });

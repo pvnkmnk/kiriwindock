@@ -539,3 +539,59 @@ export function pickSpace(spaces, machine, folder, branch) {
   }
   return (branch && here.find((s) => s.branch === branch)) || null;
 }
+
+const STAMP = /^(\d{4}-\d\d-\d\dT[\d:.]+Z) ?(.*)$/;
+const ERROR = /\b(error|errors|err|fatal|panic|exception|fail|failed|failure|critical|unhandled)\b/i;
+const WARN = /\b(warn|warning|deprecated)\b/i;
+
+/**
+ * Log lines from a wait's output: { lines: [{ at, text, src, level }], ended }.
+ * `at` is Docker's timestamp. A line with none takes the one before it.
+ */
+export function parseLogs(text, src = "") {
+  const lines = [];
+  let ended = false, at = "";
+  for (const raw of String(text ?? "").split("\n")) {
+    if (raw === "\x01ended") { ended = true; continue; }
+    if (!raw) continue;
+    const m = STAMP.exec(raw);
+    if (m) at = m[1];
+    const body = clean(m ? m[2] : raw);
+    lines.push({ at, text: body, src, level: ERROR.test(body) ? "error" : WARN.test(body) ? "warn" : "" });
+  }
+  return { lines, ended };
+}
+
+/**
+ * `all` with `more` added: lines at or before `since` (already shown) are dropped, the whole stays
+ * in time order, and only the last `cap` lines are kept.
+ */
+export function addLogs(all, more, since = "", cap = 5000) {
+  const fresh = since ? more.filter((l) => l.at > since) : more;
+  if (!fresh.length) return all;
+  const out = all.concat(fresh);
+  const last = all.length ? all[all.length - 1].at : "";
+  if (fresh.some((l) => l.at < last)) {
+    const order = new Map(out.map((l, i) => [l, i]));
+    out.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : order.get(a) - order.get(b)));
+  }
+  return out.length > cap ? out.slice(out.length - cap) : out;
+}
+
+/** A search box's text as a test for a line: /regex/ or plain text, both ignoring case. Null when empty or not a valid regex. */
+export function matcher(query) {
+  const q = String(query ?? "").trim();
+  if (!q) return null;
+  const re = /^\/(.+)\/$/.exec(q);
+  if (re) { try { const r = new RegExp(re[1], "i"); return (text) => r.test(text); } catch { return null; } }
+  const low = q.toLowerCase();
+  return (text) => text.toLowerCase().includes(low);
+}
+
+/** A Docker timestamp as local HH:MM:SS.mmm. */
+export function clock(at) {
+  const d = new Date(at);
+  if (Number.isNaN(d.getTime())) return "";
+  const p = (n, w = 2) => String(n).padStart(w, "0");
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
+}

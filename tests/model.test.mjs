@@ -348,3 +348,26 @@ test("brief tells an agent what failed, with no environment values, and pickSpac
   assert.equal(m.pickSpace(spaces, null, "/wt/feat/web", null).id, 1);
   assert.equal(m.pickSpace(spaces, "wsl", "/elsewhere", "nope"), null);
 });
+
+test("parseLogs, addLogs and matcher", () => {
+  const got = m.parseLogs("2026-11-16T10:00:00.000000001Z first\n2026-11-16T10:00:00.000000002Z \u001b[31mError: boom\u001b[0m\n  at stack line\n2026-11-16T10:00:00.000000003Z warning: slow\n\u0001ended\n", "web");
+  assert.equal(got.ended, true);
+  assert.deepEqual(got.lines.map((l) => [l.text, l.level, l.src]), [["first", "", "web"], ["Error: boom", "error", "web"], ["  at stack line", "", "web"], ["warning: slow", "warn", "web"]]);
+  assert.equal(got.lines[2].at, got.lines[1].at); // a line with no timestamp takes the one before it
+  assert.equal(m.parseLogs("").ended, false);
+
+  const line = (n, src = "a") => ({ at: `2026-11-16T10:00:00.00000000${n}Z`, text: `l${n}`, src, level: "" });
+  let all = m.addLogs([], [line(1), line(2)]);
+  all = m.addLogs(all, [line(2), line(3)], line(2).at); // the join between two waits repeats nothing
+  assert.deepEqual(all.map((l) => l.text), ["l1", "l2", "l3"]);
+  all = m.addLogs(all, [line(2, "b"), line(4, "b")]); // another container's lines land in time order
+  assert.deepEqual(all.map((l) => `${l.text}${l.src}`), ["l1a", "l2a", "l2b", "l3a", "l4b"]);
+  assert.deepEqual(m.addLogs(all, [line(5), line(6)], "", 3).map((l) => l.text), ["l4", "l5", "l6"]);
+  assert.equal(m.addLogs(all, [], ""), all);
+
+  assert.equal(m.matcher("  "), null);
+  assert.equal(m.matcher("BOOM")("Error: boom"), true);
+  assert.equal(m.matcher("/err(or)?|warn/")("a Warning"), true);
+  assert.equal(m.matcher("/(/"), null);
+  assert.match(m.clock("2026-11-16T10:00:00.123456789Z"), /^\d\d:\d\d:00\.123$/);
+});

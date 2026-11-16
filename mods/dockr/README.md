@@ -7,7 +7,7 @@ A side panel for Herdr that lists Docker containers and sets which checkout each
 1. Copy `mods/dockr/` to `~/.config/herdr-app/mods/dockr/`.
 2. In your own layout, add a block beside the work area and keep its id `dockr`:
    `{ "id": "dockr", "type": "block", "content": { "mod": "dockr" }, "size": { "px": 400 }, "min": 300, "hidden": true }`
-3. Merge `keys.json` into `~/.config/herdr-app/keys.json`. It binds `ctrl-shift-d` to `layout.toggle:dockr`.
+3. Merge `keys.json` into `~/.config/herdr-app/keys.json`. It binds `ctrl-shift-d` twice: globally to `mod.open:dockr`, which shows the panel and gives it the keyboard, and in the `mod:dockr` section to `dockr.hide`, which hides the panel while it has the keyboard.
 4. Write `~/.config/herdr-app/dockr.json` (below).
 5. Run `herdr-app check ~/.config/herdr-app/mods/dockr`.
 
@@ -47,26 +47,73 @@ Dockr starts the first time its panel is shown. Toasts only arrive after that.
 
 ## Using it
 
-Each row is one service: a status mark, its program's icon, its name and the branch it runs from.
+The panel is a list of containers, grouped the way Docker Desktop groups them: one group per compose project, then the containers in none. No config is needed for that. A project listed in `dockr.json` also gets the checkout picker.
 
-- **Status.** A green dot is up, a turning ring is starting or being worked on, red is unhealthy or exited with an error, a hollow ring is stopped. Text appears only when something needs saying.
-- **Hover a row** for its actions: Stop or Start, Restart, Rebuild, Logs, Shell.
-- **Click the branch** to open the Source picker. Type to filter, arrow keys to move, Enter to switch. Each checkout says what it costs: `recreate` takes seconds, `rebuild` builds the image first.
-- **Moving several services.** When other services' repos have a worktree on the picked branch, the picker offers "also move <service>", ticked by default. Services you do not move keep their checkout.
-- **Start if stopped.** Unticked, a Switch leaves a stopped service stopped.
-- **Progress.** A Switch or build shows its step in the row: checking, building, recreating, waiting for healthy. The eye icon opens the output. A failed one turns into a red chip that opens the output, and posts one toast.
-- **Back to <branch>.** After a Switch, one button in the note line puts the old checkout back.
-- **Use <ticket>?** When the pane you are in is on a branch that a service has a worktree for, the row offers it. Nothing switches without your click.
-- **drift.** The service runs from a different checkout than the Stack is set to, because compose was run by hand. Click the chip to bring it back.
-- **When a container fails.** The row says why (`exited 137, out of memory`, `health check: connection refused`) and shows its last three log lines. Three exits inside a minute show as `restart loop`, with one toast.
-- **Diagnose.** On a failed row. It shows the exact text an agent will get: what Docker reports and the last 100 log lines, with no environment values. Read the log lines first, since a program can print a secret. `Send` starts the agent you pick in a new tab, in the space on that branch when there is one.
-- **Logs.** The log icon on a row opens a window for that service. The one in the Stack header opens every service in one stream, in time order, with a toggle per service. Type to search (`/regex/` works), Enter or F3 for the next match, `Time` for timestamps, `Follow` or End to stay at the newest line. Errors are red and warnings amber. The window keeps the last 5,000 lines, and `Open in terminal` gives the raw tail.
-- **CPU and memory.** Each running row shows them while the panel is visible, the Stack header shows the totals, and an opened row shows the last 60 samples. A sample arrives about every two seconds.
-- **rebuild needed.** The dependency files in the checkout differ from the ones in the image. Click the chip to rebuild. It is checked when the panel shows, on Reload and when containers change.
-- **Disk.** The disk icon in the Stack header lists the Stack's images and volumes and what the whole engine holds. `Clean up` removes the images the Stack's rebuilds left behind and, when ticked, other untagged images and unused build cache. It shows what it will remove first and never removes a volume.
-- **Click a row** for its image, state, paths, ports, mounts, networks, labels and the names of its environment variables. Dockr never reads their values. Port numbers and link chips open in the browser.
-- **Stack header.** One bar segment per service, `Up` when something is not running, and a power icon for Down, which asks first and never removes volumes.
-- Builds, log tails and shells run in background terminals. Closing the view leaves them running. `Keep as tab` gives one a tab.
+**The toolbar**
+- **Search** filters by name, image, branch or published port. `Running` hides everything that is not running.
+- The refresh icon reads Docker, the worktrees and `dockr.json` again.
+
+**A group**
+- The header says `Running (4/6)`, the Machine, and the group's CPU and memory in all.
+- `Start` appears when something is not running. The stop icon stops every container and keeps them.
+- The `⋯` menu, or a right-click, has the logs of every container in one stream, Disk and clean-up, and Remove containers (compose down, which asks first and never removes volumes).
+
+**A container**
+- A green dot is running, a turning ring is starting or being worked on, red is unhealthy or exited with an error, a hollow ring is stopped.
+- The second line shows the checkout it runs from, or its image, then its links. A container with no configured link shows its published ports. Click one to open it in the browser.
+- **Hover** for Logs, Terminal, Restart, Stop or Start, and `⋯`. **Right-click** for the same menu, which also has Rebuild image, Change checkout, Diagnose and Copy name, ID or image.
+- **Click** the row to open the container: Logs, Inspect and Stats tabs, with Terminal, Restart and Stop in the title bar.
+
+**The container window**
+- **Logs.** Type to search (`/regex/` works), Enter or F3 for the next match, `Time` for timestamps, `Follow` or End to stay at the newest line. Errors are red and warnings amber. It keeps the last 5,000 lines. The eye icon opens the raw tail in a terminal.
+- **Inspect.** Image, command, state, ports, mounts, networks, labels and the names of its environment variables. Dockr never reads their values.
+- **Stats.** CPU and memory over the last minutes, network and disk in and out. It samples only while the tab shows.
+
+**Keys**
+
+The keys follow CodeyPacker's mods (`run`, `jump`, `branch`), so they are the same letters you use there. `ctrl-shift-d` shows the panel and gives it the keyboard. Letter badges and a short legend (move, open, start or stop, restart) appear while it has it. `?` lists every key that works on the selected row.
+
+| Key | Action |
+|---|---|
+| `j` / `k`, arrows, `ctrl-n` / `ctrl-p` | move |
+| a row's letter | jump to it |
+| `enter` | open the container, or fold a group |
+| `s` / `x` / `r` | start / stop / restart |
+| `t` | terminal |
+| `c` | change checkout |
+| `b` | rebuild image |
+| `d` | diagnose a failed container |
+| `o` | open its first link or port in the browser |
+| `y` | copy the container name |
+| `u` / `X` | start all / stop all in the group |
+| `D` | remove the group's containers (asks first) |
+| `h` / `l` | fold / unfold the group |
+| `g` / `G` | first / last |
+| `/` | search (`enter` or `esc` returns to the list) |
+| `m` | the `⋯` menu (`j`/`k`, `enter`) |
+| `q`, `esc` | hand the keyboard back to your pane |
+
+- **Container window:** `h`/`l` switch tabs, `j`/`k` move a line, `g`/`G` top and end, `/` search, `n`/`N` next and previous match, `f` follow, `t` timestamps, `y` copy, `s`/`x`/`r` start, stop and restart, `T` terminal, `q` close.
+- **Checkout picker:** it has a filter box, so plain letters type. Arrows or `ctrl-j`/`ctrl-k` move, `enter` switches, `ctrl-r` rebuilds, `ctrl-s` toggles "Start if stopped".
+- The panel is `focusable`, so Herdr's pane movement keys reach it too, and "Dockr: Keys" in the palette does what `ctrl-shift-d` does.
+- Dockr reaches the panel by stepping focus to the right, and leaves to the left. A layout with the panel on the left needs those two directions swapped in `main.js`.
+
+**Choosing a checkout** (projects in `dockr.json`)
+- Click the branch on a container's second line. Type to filter, arrow keys to move, Enter to switch. Each checkout says what it costs: `recreate` takes seconds, `rebuild` builds the image first.
+- When other services have a worktree on the picked branch, the picker offers "also move <service>", ticked by default. Unticked, `Start if stopped` leaves a stopped service stopped.
+- A Switch or build shows its step on the row: checking, building, recreating, waiting for healthy. A failed one becomes a red chip that opens the output.
+- `Undo: back to <branch>` appears after a Switch.
+- `Switch to <ticket>` appears on a container when the pane you are in is on a branch it has a worktree for. Nothing switches without your click.
+
+**When something needs you**, the row says so in a sentence, with buttons:
+- **A failure:** why (`exited 137, out of memory`, `health check: connection refused`), the last three log lines, and `Diagnose`, `Logs`, `Start`. Three exits inside a minute show as `restart loop`.
+- **Diagnose** shows the exact text an agent will get: what Docker reports and the last 100 log lines, with no environment values. Read the log lines first, since a program can print a secret. `Send` starts the agent you pick in a new tab, in the space on that branch when there is one.
+- **A different checkout than the one set** (drift), which a compose command run outside Dockr causes: switch back, or keep what runs.
+- **Dependency files changed since the image was built:** `Rebuild`.
+
+**Disk** lists the Stack's images and volumes and what the whole engine holds. `Clean up` removes the images the Stack's rebuilds left behind and, when ticked, other untagged images and unused build cache. It shows what it will remove first and never removes a volume.
+
+Builds, log tails and terminals run in background terminals. Closing the view leaves them running. `Keep as tab` gives one a tab.
 
 ## How it stores a Switch
 

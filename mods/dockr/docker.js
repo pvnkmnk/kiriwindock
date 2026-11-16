@@ -174,6 +174,12 @@ export async function worktrees(machine, main) {
   return r.code === 0 ? parseWorktrees(r.stdout) : [];
 }
 
+/** A Repo's local branches, most recently committed first. Empty when git fails there. */
+export async function branches(machine, main) {
+  const r = await exec("git", ["-C", main, "branch", "--sort=-committerdate", "--format=%(refname:short)"], on(machine)).catch(failed);
+  return r.code === 0 ? r.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
+}
+
 /** Which of the Stack's env files exist. Neither is opened. */
 export async function envFiles(machine, stack) {
   const r = await exec("sh", ["-c", '[ -f "$1" ] && echo env; [ -f "$2" ] && echo dockr; true', "dockr", `${stack.dir}/.env`, `${stack.dir}/.dockr.env`], on(machine)).catch(failed);
@@ -205,6 +211,12 @@ export async function sourceHash(machine, dir, files) {
 /** The same hash of the manifests inside an image, read from its working directory. */
 export async function imageHash(machine, image, files) {
   return hashOf(await exec("docker", ["run", "--rm", "--entrypoint", "sh", image, "-c", HASH, "dockr", ...files], { ...on(machine), timeout: 60000 }).catch(failed));
+}
+
+/** A plain docker command on containers by name (start, stop, restart), run to its end. Returns an error line or null. */
+export async function plain(machine, verb, names) {
+  const r = await exec("docker", [verb, ...names], { ...on(machine), timeout: 180000 }).catch(failed);
+  return r.code === 0 ? null : explain(r.stderr || r.stdout, machine);
 }
 
 /** A short compose command (start, stop, restart) run to its end. Returns an error line or null. */

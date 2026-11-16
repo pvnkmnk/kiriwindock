@@ -406,3 +406,73 @@ test("parseDisk reads the engine totals, the Stack's unused images and its volum
   assert.deepEqual(d.volumes.map((v) => [v.name, v.used]), [["p_data", true]]);
   assert.deepEqual(m.parseDisk("").unused, []);
 });
+
+test("groupOther, rowMatches and groupState", () => {
+  const row = (name, project, o = {}) => ({ key: `/${name}`, name, container: { name, project, service: name.replace(/^.*-(\w+)-1$/, "$1"), image: "img", state: "running", health: null, exitCode: 0, ports: [{ host: 8080 }], ...o } });
+  const g = m.groupOther([row("solo", null), row("zeta-web-1", "zeta"), row("alpha-db-1", "alpha"), row("zeta-api-1", "zeta")]);
+  assert.deepEqual(g.map((x) => [x.name, x.rows.map((r) => r.name)]), [["alpha", ["db"]], ["zeta", ["web", "api"]], [null, ["solo"]]]);
+  assert.deepEqual(m.groupOther([]), []);
+
+  const r = { name: "gateway", container: { name: "shop-gateway-1", image: "shop-gateway", ports: [{ host: 3010 }] }, actual: { branch: "301-add" } };
+  assert.equal(m.rowMatches(r, ""), true);
+  assert.equal(m.rowMatches(r, "GATE 301"), true);
+  assert.equal(m.rowMatches(r, "3010"), true);
+  assert.equal(m.rowMatches(r, "nginx"), false);
+
+  assert.deepEqual(m.groupState([row("a", "p"), row("b", "p")]), { text: "Running (2/2)", running: 2, total: 2, kind: "up" });
+  assert.equal(m.groupState([row("a", "p"), row("b", "p", { state: "exited" })]).text, "Running (1/2)");
+  assert.equal(m.groupState([row("a", "p"), row("b", "p", { state: "exited", exitCode: 1 })]).kind, "bad");
+  assert.equal(m.groupState([row("b", "p", { state: "exited" })]).text, "Stopped (0/1)");
+  assert.equal(m.groupState([{ name: "x", container: null }]).text, "Not created");
+});
+
+test("looseBranches are the branches no checkout is on", () => {
+  assert.deepEqual(m.looseBranches(["main", "feat", "old", "spike"], [{ branch: "main" }, { branch: "feat" }, { branch: null }]), ["old", "spike"]);
+  assert.deepEqual(m.looseBranches([], [{ branch: "main" }]), []);
+});
+
+test("panelItems, keyAction and keyHints follow the run mod's keys", () => {
+  const g = (key, name, rows, managed = true) => ({ key, name, managed, rows });
+  const r = (key) => ({ key, name: key });
+  const groups = [g("stack:a", "a", [r("a/web"), r("a/api")]), g("loose", null, [r("/solo")], false), g("stack:empty", "empty", [])];
+  const items = m.panelItems(groups, { loose: true }, (x) => x.rows, false);
+  assert.deepEqual(items.map((i) => `${i.kind}:${i.key}`), ["group:stack:a", "row:a/web", "row:a/api", "group:loose"]);
+  assert.deepEqual(m.panelItems(groups, {}, (x) => x.rows.filter((y) => y.key === "/solo"), true).map((i) => i.key), ["loose", "/solo"]);
+
+  const row = items[1], head = items[0], loose = items[3];
+  const up = { running: true, created: true, service: true, bad: false, link: true }, down = { running: false, created: true, service: false, bad: true, link: false };
+  const act = (k, item, f) => { const a = m.keyAction(k, item, f); return a ? `${a.on}:${a.action}` : null; };
+  assert.equal(act("s", row, up), null);
+  assert.equal(act("s", row, down), "row:start");
+  assert.equal(act("x", row, up), "row:stop");
+  assert.equal(act("x", row, down), null);
+  assert.equal(act("r", row, up), "row:restart");
+  assert.equal(act("t", row, up), "row:terminal");
+  assert.equal(act("c", row, up), "row:source");
+  assert.equal(act("c", row, down), null);
+  assert.equal(act("d", row, down), "row:diagnose");
+  assert.equal(act("o", row, up), "row:browser");
+  assert.equal(act("enter", row, up), "row:open");
+  assert.equal(act("u", row, up), "group:up");
+  assert.equal(act("shift-x", row, up), "group:stop");
+  assert.equal(act("shift-d", row, up), "group:down");
+  assert.equal(act("h", row, up), "group:fold");
+  assert.equal(act("enter", head), "group:toggle");
+  assert.equal(act("s", head), null);
+  assert.equal(act("u", loose), null); // the containers in no project have no group actions
+  assert.equal(act("u", row, { ...up, anyDown: false }), null); // nothing to start
+  assert.equal(act("shift-x", row, { ...up, anyUp: false }), null); // nothing to stop
+  assert.equal(act("shift-d", loose), null);
+  assert.equal(act("q", null), "panel:leave");
+  assert.equal(act("/", row, up), "panel:search");
+  assert.equal(act("shift-g", row, up), "panel:last");
+  assert.equal(act("z", row, up), null);
+  for (const [key] of m.keyHints(row, up)) if (/^[a-z]$/.test(key)) assert.ok(m.KEY_LETTERS.includes(key), key);
+  assert.ok(m.keyHints(row, up).some(([k, w]) => k === "x" && w === "stop"));
+  assert.ok(!m.keyHints(row, up).some(([k]) => k === "s"));
+  assert.ok(m.keyHints(head).some(([k, w]) => k === "enter" && w === "fold"));
+  assert.deepEqual(m.coreHints(row, up).map(([k]) => k), ["j/k", "enter", "x", "r", "?"]);
+  assert.deepEqual(m.coreHints(row, down).map(([k]) => k), ["j/k", "enter", "s", "?"]);
+  assert.equal(act("?", row, up), "panel:help");
+  assert.equal(act("shift-/", null), "panel:help");
+});

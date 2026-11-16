@@ -171,6 +171,13 @@ test("a checkout whose dependencies changed is marked as needing a rebuild, unti
   assert.deepEqual(store.stale, {});
 });
 
+test("the picker's list is the Repo's worktrees plus the branches no checkout is on", opts, async () => {
+  git(join(root, "web"), "branch", "idea");
+  const [list, all] = await Promise.all([docker.worktrees(null, join(root, "web")), docker.branches(null, join(root, "web"))]);
+  assert.deepEqual(list.map((s) => s.branch).sort(), ["deps", "feat", "main"]);
+  assert.deepEqual(model.looseBranches(all, list), ["idea"]);
+});
+
 test("the stats wait returns one sample that names the running containers", opts, async () => {
   const r = await docker.waitStats(null);
   assert.equal(r.error, undefined);
@@ -288,6 +295,34 @@ test("a failing action exits with its code and labels its terminal", opts, async
   const op = store.op(store.stack(NAME), "Fail", "switch", ["web"], [], ["sh -c 'exit 7'"]);
   assert.match(op.script, /hc label "\$HC_TERMINAL_ID" dockr\.failed="\$code"/);
   assert.equal(run(op).status, 7);
+});
+
+test("a container outside every Stack starts, stops and restarts by name, and a Stack stops as a whole", opts, async () => {
+  const name = `${NAME}-loose`;
+  sh(root, "docker", "run", "-d", "--name", name, "--stop-timeout", "0", "busybox:1.36", "sh", "-c", "while true; do sleep 1; done");
+  try {
+    await look();
+    const find = () => store.view().other.find((r) => r.name === name);
+    assert.equal(find().container.state, "running");
+    assert.deepEqual(model.groupOther(store.view().other).filter((g) => g.rows.some((r) => r.key === find().key)).map((g) => g.name), [null]);
+    assert.equal(await store.plain("stop", [find().container]), null);
+    assert.equal(find().container.state, "exited");
+    assert.equal(await store.plain("start", [find().container]), null);
+    assert.equal(find().container.state, "running");
+    assert.equal(await store.plain("restart", [find().container]), null);
+    assert.equal(find().container.state, "running");
+    const shell = store.prepareShell(find());
+    assert.match(shell.script, new RegExp(`docker exec -it '${name}'`));
+    assert.match(await store.plain("start", [{ ...find().container, name: `${name}-nope` }]), /^start: /);
+  } finally { spawnSync("docker", ["rm", "-f", name], { stdio: "ignore" }); }
+  await look();
+  if (!row("web").container || row("web").container.state !== "running") { const r = run(await store.prepareStack(NAME, "up")); assert.equal(r.status, 0, r.stderr); await look(); }
+  assert.equal(await store.stopStack(NAME), null);
+  assert.ok(store.rows(NAME).every((r) => r.container && r.container.state === "exited"));
+  const r = run(await store.prepareStack(NAME, "up"));
+  assert.equal(r.status, 0, r.stderr);
+  await look();
+  assert.ok(store.rows(NAME).every((r) => r.container.state === "running"));
 });
 
 test("Clean up removes the images a rebuild left behind and keeps the volume", opts, async () => {

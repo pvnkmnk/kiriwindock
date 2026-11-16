@@ -657,3 +657,116 @@ export function parseDisk(text) {
     volumes: rows(names).map(([name]) => ({ name, size: sizeOf[name]?.size ?? 0, used: !!sizeOf[name]?.used })),
   };
 }
+
+/**
+ * The containers outside every configured Stack as Docker Desktop groups them: one group per
+ * compose project, then one (name null) for those in no project. Empty groups are left out.
+ */
+export function groupOther(other) {
+  const by = new Map();
+  for (const r of other ?? []) {
+    const name = r.container?.project ?? null;
+    if (!by.has(name)) by.set(name, []);
+    by.get(name).push(name ? { ...r, name: r.container.service ?? r.name } : r);
+  }
+  const named = [...by.entries()].filter(([n]) => n).sort(([a], [b]) => a.localeCompare(b)).map(([name, rows]) => ({ name, rows }));
+  return by.has(null) ? [...named, { name: null, rows: by.get(null) }] : named;
+}
+
+/** Whether a row matches the search box: every word is in its name, image, branch or a published port. */
+export function rowMatches(row, query) {
+  const words = String(query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const c = row.container;
+  const hay = [row.name, c?.name, c?.image, row.actual?.branch, row.set?.branch, ...(c?.ports ?? []).map((p) => String(p.host))].filter(Boolean).join(" ").toLowerCase();
+  return words.every((w) => hay.includes(w));
+}
+
+/** "Running (2/3)" as Docker Desktop words a group, and how well it is: "up", "part", "off" or "bad". */
+export function groupState(rows, statusOf_ = statusOf) {
+  const total = rows.length, running = rows.filter((r) => r.container?.state === "running").length;
+  const bad = rows.some((r) => statusOf_(r.container).kind === "bad");
+  const text = running ? `Running (${running}/${total})` : rows.some((r) => r.container) ? `Stopped (0/${total})` : "Not created";
+  return { text, running, total, kind: bad ? "bad" : running === total ? "up" : running ? "part" : "off" };
+}
+
+/** The local branches that no checkout is on, so nothing can run from them yet. */
+export function looseBranches(branches, sources) {
+  const taken = new Set((sources ?? []).map((s) => s.branch).filter(Boolean));
+  return (branches ?? []).filter((b) => !taken.has(b));
+}
+
+/** The letters Dockr's own keys use, so no row is given one of them as its hint. */
+export const KEY_LETTERS = "sxrutcbdoyhlgmqjk";
+
+/**
+ * The panel as one list for the keyboard: each group's header, then its rows unless it is folded.
+ * `shown(group)` gives the rows the search leaves. A group with none is left out while filtering.
+ */
+export function panelItems(groups, folded, shown, filtering) {
+  const out = [];
+  for (const g of groups) {
+    const rows = shown(g);
+    if (!rows.length && (filtering || !g.rows.length)) continue;
+    out.push({ kind: "group", key: g.key, group: g });
+    if (!folded[g.key]) for (const r of rows) out.push({ kind: "row", key: r.key, row: r, group: g });
+  }
+  return out;
+}
+
+/**
+ * What a key does to the selected item, as CodeyPacker's `run` mod maps them: { on: "row" | "group" | "panel", action }.
+ * Null when the key does nothing there. `k` is the keystroke ("s", "shift-x", "enter", "/").
+ * `facts`: { running, created, service, bad, link } for a row, and { anyDown, anyUp } for its group.
+ */
+export function keyAction(k, item, facts = {}) {
+  if (k === "q") return { on: "panel", action: "leave" };
+  if (k === "?" || k === "shift-/") return { on: "panel", action: "help" };
+  if (k === "/") return { on: "panel", action: "search" };
+  if (k === "g") return { on: "panel", action: "first" };
+  if (k === "shift-g") return { on: "panel", action: "last" };
+  if (!item) return null;
+  const group = (action) => ({ on: "group", action });
+  if (k === "u") return item.group.name && facts.anyDown !== false ? group("up") : null;
+  if (k === "shift-x") return item.group.name && facts.anyUp !== false ? group("stop") : null;
+  if (k === "shift-d") return item.group.managed ? group("down") : null;
+  if (k === "h") return group("fold");
+  if (item.kind === "group") {
+    if (k === "enter" || k === "l") return group(k === "l" ? "unfold" : "toggle");
+    if (k === "m") return item.group.name ? group("menu") : null;
+    return null;
+  }
+  const row = (action) => ({ on: "row", action });
+  if (k === "enter") return facts.created ? row("open") : null;
+  if (k === "s") return facts.running ? null : row("start");
+  if (k === "x") return facts.running ? row("stop") : null;
+  if (k === "r") return facts.running ? row("restart") : null;
+  if (k === "t") return facts.running ? row("terminal") : null;
+  if (k === "c") return facts.service ? row("source") : null;
+  if (k === "b") return facts.service ? row("rebuild") : null;
+  if (k === "d") return facts.bad ? row("diagnose") : null;
+  if (k === "o") return facts.link ? row("browser") : null;
+  if (k === "y") return facts.created ? row("copy") : null;
+  if (k === "m") return row("menu");
+  return null;
+}
+
+/** The few keys the legend always shows: move, open, the start or stop that applies, restart, and how to see the rest. */
+export function coreHints(item, facts = {}) {
+  const core = new Set(["j/k", "enter", "s", "x", "r"]);
+  return [...keyHints(item, facts).filter(([k]) => core.has(k)), ["?", "all keys"]];
+}
+
+/** Every key hint for the selected item: [key, what] pairs, only the ones that do something now. */
+export function keyHints(item, facts = {}) {
+  const all = [["j/k", "move"]];
+  const add = (k, label, what) => { if (keyAction(k, item, facts)) all.push([label ?? k, what]); };
+  if (item?.kind === "group") { add("enter", "enter", "fold"); }
+  add("enter", "enter", item?.kind === "row" ? "open" : null);
+  add("s", null, "start"); add("x", null, "stop"); add("r", null, "restart"); add("t", null, "terminal");
+  add("c", null, "checkout"); add("b", null, "rebuild"); add("d", null, "diagnose"); add("o", null, "browser"); add("y", null, "copy name");
+  add("u", null, "start all"); add("shift-x", "X", "stop all"); add("shift-d", "D", "remove");
+  add("m", null, "menu");
+  all.push(["/", "search"], ["q", "leave"]);
+  return all.filter(([, what]) => what);
+}

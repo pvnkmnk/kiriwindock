@@ -235,6 +235,35 @@ export class Store {
     return error ? `${args[0]} ${row.name}: ${error}` : null;
   }
 
+  /** Start, stop or restart containers that are in no configured Stack, by name. Returns an error line or null. */
+  async plain(verb, containers) {
+    if (!containers.length) return null;
+    const machine = this.machineOf(containers[0]);
+    for (const c of containers) this.quiet[c.name] = Date.now();
+    const error = await docker.plain(machine, verb, containers.map((c) => c.name));
+    await this.look(machine ?? "");
+    return error ? `${verb}: ${error}` : null;
+  }
+
+  /** Stop every Service of a Stack, keeping its containers. Returns an error line or null. */
+  async stopStack(name) {
+    await this.loadConfig();
+    const stack = this.stack(name);
+    if (!stack) return `${name} is no longer in dockr.json.`;
+    this.has[name] = await docker.envFiles(stack.machine, stack);
+    this.hush(this.rows(name));
+    const error = await docker.compose(stack.machine, stack, this.has[name], ["stop"]);
+    await this.look(stack.machine ?? "");
+    return error ? `stop ${name}: ${error}` : null;
+  }
+
+  /** A terminal inside a container that is in no configured Stack. */
+  prepareShell(row) {
+    const title = `Terminal · ${row.name}`;
+    return { stack: { name: "-", machine: this.machineOf(row.container), dir: "/" }, title, labels: { kind: "shell", service: row.name, title },
+      script: `docker exec -it ${model.q(row.container.name)} sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'` };
+  }
+
   /** Rebuild one Service from the Source it is set to. */
   async prepareRebuild(row) {
     await this.loadConfig();
@@ -263,7 +292,7 @@ export class Store {
     const stack = this.stack(row.stack);
     if (!stack) return { error: `${row.stack} is no longer in dockr.json.` };
     this.has[stack.name] = await docker.envFiles(stack.machine, stack);
-    const title = `${kind === "logs" ? "Logs" : "Shell"} · ${row.name}`;
+    const title = `${kind === "logs" ? "Logs" : "Terminal"} · ${row.name}`;
     const script = kind === "logs"
       ? docker.composeLine(stack, this.has[stack.name], ["logs", "-f", "--tail", "200", row.name])
       : `docker exec -it ${model.q(row.container.name)} sh -c 'command -v bash >/dev/null 2>&1 && exec bash || exec sh'`;

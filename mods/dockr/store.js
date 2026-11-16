@@ -20,6 +20,9 @@ export class Store {
     this.errors = {};          // machine -> why Docker could not be read there
     this.prev = null;          // the containers at the last look, for toasts
     this.quiet = {};           // container name -> when the user last acted on it
+    this.exits = {};           // container name -> { finishedAt, restarts, times }: its exits, for restart loops
+    this.loops = new Set();    // container names in a restart loop at the last look
+    this.tails = {};           // container id -> { key, lines }: the last lines of one that is not well
     this.pendingBuilt = {};    // "stack/service" -> { path, at }: a build of an unmounted Service under way
     this.built = saved;
     this.save = save;
@@ -84,10 +87,42 @@ export class Store {
     this.recordBuilds(next);
     const now = Date.now();
     const quiet = new Set(Object.keys(this.quiet).filter((n) => now - this.quiet[n] < QUIET_MS));
-    const out = model.toasts(this.prev, next, this.stacks.map((s) => s.name), quiet);
+    const names = new Set(next.map((c) => c.name));
+    for (const n of Object.keys(this.exits)) if (!names.has(n)) delete this.exits[n];
+    for (const c of next) this.exits[c.name] = model.noteExits(this.exits[c.name], c);
+    const loops = new Set(next.filter((c) => this.looping(c, now)).map((c) => c.name));
+    const out = model.toasts(this.prev, next, this.stacks.map((s) => s.name), quiet, loops, this.loops);
+    this.loops = loops;
     this.prev = next;
+    await this.readTails(machine, r.containers);
     return out;
   }
+
+  /** The Machine a container was read from, null for this computer. */
+  machineOf(c) {
+    for (const [m, list] of Object.entries(this.byMachine)) if (list.some((x) => x.id === c.id)) return m || null;
+    return null;
+  }
+
+  looping(c, now = Date.now()) { return !!c && model.looping(this.exits[c.name]?.times, now); }
+
+  /** What a row says about its container, restart loops included. */
+  status(c) { return model.statusOf(c, this.looping(c)); }
+
+  /** Reads the last lines of each container that is not well, once per failure. */
+  async readTails(machine, containers) {
+    const ids = new Set(containers.map((c) => c.id));
+    for (const id of Object.keys(this.tails)) if (!ids.has(id) && this.tails[id].machine === machine) delete this.tails[id];
+    await Promise.all(containers.map(async (c) => {
+      if (!model.why(c) && !this.looping(c)) { delete this.tails[c.id]; return; }
+      const key = `${c.finishedAt}/${c.health}/${c.restarts}`;
+      if (this.tails[c.id]?.key === key) return;
+      this.tails[c.id] = { key, machine, lines: await docker.lastLines(machine || null, c.id, 20) };
+    }));
+  }
+
+  /** The last lines of a container that is not well. Empty for one that is. */
+  tail(c) { return (c && this.tails[c.id]?.lines) || []; }
 
   /** A build of an unmounted Service has made a new container: remember which Source its image came from. */
   recordBuilds(containers) {

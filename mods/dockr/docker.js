@@ -1,10 +1,22 @@
 // Everything Dockr asks of Docker, git and herdr-core. Each call runs on the Stack's Machine.
 import { exec, hc, readTextFile, window as win } from "herdr";
-import { composeArgs, desktopBinds, explain, parseContainers, parseWorktrees, q } from "./model.js";
+import { clean, composeArgs, desktopBinds, explain, parseContainers, parseWorktrees, q } from "./model.js";
 
 const on = (machine) => (machine ? { on: machine } : {});
 const failed = (e) => ({ code: 1, stdout: "", stderr: String(e?.message ?? e) });
 const said = (r) => (r.stderr || r.stdout || `exited ${r.code}`).trim().split(/\r?\n/).pop();
+
+// Only what Dockr uses. Environment entries are cut to their names inside Docker, so no value reaches Dockr.
+const INSPECT = '{"Id":{{json .Id}},"Name":{{json .Name}},"Image":{{json .Image}},"Created":{{json .Created}},"Path":{{json .Path}},"Args":{{json .Args}},'
+  + '"RestartCount":{{json .RestartCount}},"State":{{json .State}},"Mounts":{{json .Mounts}},"Networks":{{json .NetworkSettings.Networks}},'
+  + '"HostConfig":{"PortBindings":{{json .HostConfig.PortBindings}}},'
+  + '"Config":{"Image":{{json .Config.Image}},"Labels":{{json .Config.Labels}},"Env":[{{range $i, $e := .Config.Env}}{{if $i}},{{end}}{{json (index (split $e "=") 0)}}{{end}}]}}';
+
+/** The last `lines` lines a container wrote, oldest first. Empty when they cannot be read. */
+export async function lastLines(machine, id, lines) {
+  const r = await exec("sh", ["-c", 'docker logs --tail "$1" "$2" 2>&1', "dockr", String(lines), id], on(machine)).catch(failed);
+  return r.code === 0 ? clean(r.stdout).split("\n").map((l) => l.trimEnd()).filter(Boolean).slice(-lines) : [];
+}
 
 /** Every container on that Machine's Docker: { containers, error? }. */
 export async function snapshot(machine) {
@@ -13,7 +25,7 @@ export async function snapshot(machine) {
   const list = ps.stdout.split(/\r?\n/).map((l) => { try { return JSON.parse(l).ID; } catch { return null; } }).filter(Boolean);
   if (!list.length) return { containers: [] };
   // A container removed between the two calls makes inspect exit 1 and still print the rest.
-  const r = await exec("docker", ["inspect", ...list], on(machine)).catch(failed);
+  const r = await exec("docker", ["inspect", "--format", INSPECT, ...list], on(machine)).catch(failed);
   const containers = parseContainers(r.stdout, desktopBinds(ps.stdout));
   return containers.length || r.code === 0 ? { containers } : { containers: [], error: `docker inspect: ${said(r)}` };
 }

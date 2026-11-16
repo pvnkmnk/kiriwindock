@@ -2,15 +2,16 @@
 // The config is ~/.config/herdr-app/dockr.json. Nothing here runs on a timer: container state comes
 // from waiting on `docker events`, and files are read when the panel shows and before each action.
 //
-// One file, three faces, chosen by props: the panel, the Source picker (a popup), and the bar over
-// a peeked terminal.
+// Faces, chosen by props: the panel, the Source picker (a popup), the bar over a peeked terminal
+// and the Diagnose dialog (diagnose.js).
 
 import { View, div, svg } from "gpui-kit";
 import { v_flex, h_flex, InputState, Input } from "gpui-base";
-import { closeOverlay, focused, layout, nextCommand, notify, openOverlay, panes, props, run, setShared, shared, spaces, terminals, theme } from "herdr";
+import { closeOverlay, focused, layout, nextCommand, notify, openOverlay, panes, props, run, setShared, settings, shared, spaces, terminals, theme } from "herdr";
 import * as model from "./model.js";
 import * as docker from "./docker.js";
 import { Store } from "./store.js";
+import * as diagnose from "./diagnose.js";
 
 const icon = (name) => `mods/dockr/icons/${name}.svg`;
 const REQUEST = "dockr.request"; // the picker's ask, handed to the panel through shared state
@@ -25,6 +26,8 @@ export default class Dockr extends View {
     this.picking = props()?.picker ?? null;
     if (this.peeked) { this.handle.focus(); return; }
     if (this.picking) return this.initPicker(cx);
+    this.diagnosing = props()?.diagnose ?? null;
+    if (this.diagnosing) return diagnose.init(this, cx);
 
     this.store = new Store(load("built", {}), (built) => localStorage.setItem("built", JSON.stringify(built)));
     this.watching = new Set(); // machines with an event wait running
@@ -56,7 +59,7 @@ export default class Dockr extends View {
 
   post(toasts) {
     if (model.modShown(layout(), "dockr")) return;
-    for (const t of toasts) notify({ title: t.title, body: t.stack, level: t.level, action: { name: "layout.show", args: { id: "dockr" } } });
+    for (const t of toasts) notify({ title: t.title, body: t.body ? `${t.stack}: ${t.body}` : t.stack, level: t.level, action: { name: "layout.show", args: { id: "dockr" } } });
   }
 
   async reload(cx) {
@@ -140,6 +143,25 @@ export default class Dockr extends View {
     const live = this.ops().find((o) => o.stack === row.stack && o.kind === kind && o.service === row.name);
     if (live) return this.peek(live.address, live.title, true);
     await this.runOp(cx, await this.store.prepareTail(row, kind), true);
+  }
+
+  /** Opens the Diagnose dialog for a container that is not well, with the text an agent would get. */
+  async openDiagnose(cx, r) {
+    const c = r.container;
+    if (!c) return;
+    const stack = r.stack ? this.store.stack(r.stack) : null;
+    const machine = stack ? stack.machine ?? null : this.store.machineOf(c);
+    const lines = await docker.lastLines(machine, c.id, 100);
+    const src = r.actual ?? r.set ?? null;
+    openOverlay({
+      mod: "dockr", kind: "dialog", width: 720, height: 560,
+      props: { diagnose: {
+        service: r.name, machine, folder: src?.path ?? stack?.dir ?? null, branch: src?.branch ?? null,
+        why: model.why(c) || this.store.status(c).text,
+        brief: model.brief({ stack, row: r, container: c, lines, loop: this.store.looping(c) }),
+      } },
+    });
+    cx.notify();
   }
 
   askDown(name) {
@@ -238,7 +260,8 @@ export default class Dockr extends View {
 
   renderRow(t, r, urls, ops, branch) {
     const c = r.container, id = idOf(r.key), open = this.open === r.key, managed = !!r.stack;
-    const st = model.statusOf(c), running = c?.state === "running";
+    const st = this.store.status(c), running = c?.state === "running";
+    const cause = st.kind === "bad" ? model.why(c) || st.text : "";
     const op = managed ? model.opFor(ops, r.stack, r.name) : null;
     const ph = model.phase(r.name, op, c);
     const busy = this.busy[r.key] ?? (ph && !ph.failed ? ph.text : null);
@@ -301,32 +324,57 @@ export default class Dockr extends View {
       head.child(div().flex_none().pr(4).text_size(11).text_color(st.kind === "bad" ? t.ansi1 : t.dim).child(st.text));
     }
 
-    if (!open && !urls.length) return head;
+    if (!open && !urls.length && !cause) return head;
     return v_flex().w_full().child(head)
+      .when(!!cause, (el) => el.child(this.renderFailure(t, r, cause).when(open, (x) => x.bg(t.raised))))
       .when(urls.length > 0, (el) => el.child(this.links(t, id, urls).pl(49).pr(10).pb(4).when(open, (x) => x.bg(t.raised))))
       .when(open, (el) => el.child(this.renderDetail(t, r)));
+  }
+
+  /** Under a row whose container is not well: why, its last lines, and what to do about it. */
+  renderFailure(t, r, cause) {
+    const id = idOf(r.key), lines = this.store.tail(r.container).slice(-3);
+    const mono = settings().font_family ?? "JetBrains Mono";
+    return v_flex().w_full().pl(49).pr(10).pb(5).gap(3)
+      .when(cause !== this.store.status(r.container).text, (el) => el.child(div().w_full().text_size(11).text_color(t.ansi1).truncate().tooltip(cause).child(cause)))
+      .when(lines.length > 0, (el) => el.child(v_flex().w_full().px(6).py(3).rounded(4).bg(t.surface).font_family(mono).text_size(10.5).text_color(t.muted)
+        .children(lines.map((l) => div().w_full().truncate().tooltip(l).child(l)))))
+      .child(h_flex().w_full().gap(5)
+        .child(this.button(t, `diag-${id}`, "Diagnose", (cx) => this.openDiagnose(cx, r), { tip: "Show what an agent would be told about this failure, then send it" }))
+        .child(this.button(t, `faillogs-${id}`, "Logs", (cx) => this.tail(cx, r, "logs"), { dim: true })));
   }
 
   /** What the row has no room for. Actions are on the row itself. */
   renderDetail(t, r) {
     const c = r.container, id = idOf(r.key);
     const line = (label, value, color) => h_flex().gap(6).text_size(11)
-      .child(div().w(46).flex_none().text_color(t.dim).child(label))
+      .child(div().w(58).flex_none().text_color(t.dim).child(label))
       .child(div().flex_1().min_w(0).truncate().tooltip(value).text_color(color ?? t.muted).child(value));
     const out = v_flex().w_full().pl(49).pr(10).pb(8).pt(2).gap(4).bg(t.raised);
     if (c) out.child(line("Image", c.image));
-    if (c) out.child(line("State", c.health ? `${c.state} · ${c.health}` : c.state));
+    if (c) out.child(line("State", `${c.health ? `${c.state} · ${c.health}` : c.state}${c.restarts ? ` · ${c.restarts} restarts` : ""}`));
+    if (c?.healthOutput) out.child(line("Health", c.healthOutput.split(/\r?\n/).filter(Boolean).pop() ?? "", c.health === "unhealthy" ? t.ansi1 : undefined));
     if (r.service) {
       out.child(line("Runs", c ? (r.actual ? `${r.actual.path}${mainTag(r.actual)}` : "unknown: built outside Dockr") : "nothing yet", r.drift ? t.ansi3 : undefined));
       if (r.set && (r.drift || !c || !r.actual)) out.child(line("Set to", `${r.set.path}${mainTag(r.set)}${r.set.missing ? "  · no such worktree" : ""}`));
     }
     if (c?.ports.length) {
       out.child(h_flex().gap(6).items_center().text_size(11)
-        .child(div().w(46).flex_none().text_color(t.dim).child("Ports"))
+        .child(div().w(58).flex_none().text_color(t.dim).child("Ports"))
         .child(h_flex().flex_1().min_w(0).gap(4).flex_wrap().children(c.ports.map((p) =>
           div().id(`port-${id}-${p.host}`).px(5).rounded(3).bg(t.surface).text_color(t.accent).cursor_pointer().hover((s) => s.bg(t.hover))
             .tooltip(`${model.portUrl(p.host)} (container ${p.container})`)
             .on_click(() => docker.openUrl(model.portUrl(p.host))).child(String(p.host))))));
+    }
+    // Lists: the row shows them on one line, the tooltip one per line.
+    const list = (label, items) => items.length && out.child(h_flex().gap(6).text_size(11)
+      .child(div().w(58).flex_none().text_color(t.dim).child(label))
+      .child(div().flex_1().min_w(0).truncate().tooltip(items.join("\n")).text_color(t.muted).child(items.join(", "))));
+    if (c) {
+      list("Mounts", c.mounts.map((m) => `${m.source} → ${m.target}${m.rw ? "" : " (read only)"}`));
+      list("Networks", c.networks.map((n) => (n.ip ? `${n.name} ${n.ip}` : n.name)));
+      list("Env", c.env); // names only: Dockr never reads the values
+      list("Labels", Object.entries(c.labels).filter(([k]) => !k.startsWith("com.docker.compose.")).map(([k, v]) => `${k}=${v}`));
     }
     return out;
   }
@@ -341,7 +389,7 @@ export default class Dockr extends View {
         .child(svg(icon(folded ? "right" : "down")).size(12).flex_none().text_color(t.dim))
         .child(div().min_w(0).truncate().font_semibold().text_color(t.foreground).child(name))
         .child(h_flex().flex_none().gap(2).items_center().children(g.rows.map((r) =>
-          div().w(9).h(4).rounded(2).bg(this.statusColor(t, model.statusOf(r.container).kind)))))
+          div().w(9).h(4).rounded(2).bg(this.statusColor(t, this.store.status(r.container).kind)))))
         .child(div().flex_none().text_size(11).text_color(t.dim).child(`${g.running} up${g.stack.machine ? ` · ${g.stack.machine}` : ""}`)))
       .when(!!this.busy[name] || (!!op && op.failed == null), (el) => el.child(svg(icon("spinner")).size(12).flex_none().text_color(t.working).spin(900)))
       .when(down, (el) => el.child(this.button(t, `up-${id}`, "Up", async (cx) => this.runOp(cx, await this.store.prepareStack(name, "up")), { primary: true, tip: "Start every Service that is not running" })))
@@ -512,6 +560,7 @@ export default class Dockr extends View {
     const t = theme();
     if (this.peeked) return this.renderBar(t);
     if (this.picking) return this.renderPicker(t);
+    if (this.diagnosing) return diagnose.render(this, t);
     return this.renderPanel(t, cx);
   }
 }

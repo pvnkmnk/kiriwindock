@@ -270,3 +270,81 @@ test("programIcon and explain", () => {
   assert.match(m.explain("Bind for 127.0.0.1:3010 failed: port is already allocated"), /^Port 3010 is already in use/);
   assert.equal(m.explain("line one\nno configuration file provided: not found\n"), "no configuration file provided: not found");
 });
+
+test("parseContainers reads one object per line and keeps environment names only", () => {
+  const line = (o) => JSON.stringify(o);
+  const out = m.parseContainers([
+    line({ Id: "a", Name: "/a", RestartCount: 4, State: { Status: "exited", ExitCode: 137, OOMKilled: true, FinishedAt: "2026-11-16T10:00:00Z", Health: { Status: "unhealthy", Log: [{ Output: "old" }, { Output: "\u001b[31mconnection refused\u001b[0m\n" }] } },
+      Mounts: [{ Type: "bind", Source: "/host/src", Destination: "/app/src", RW: true }, { Type: "volume", Name: "data", Destination: "/data", RW: false }],
+      Networks: { net: { IPAddress: "172.18.0.2" } }, Config: { Labels: { "com.docker.compose.project": "p", "desktop.docker.io/binds/0/Source": "/x" }, Env: ["SECRET=abc=def", "PATH=/bin"] } }),
+    "", "not json",
+    line({ Id: "b", Name: "/b" }),
+  ].join("\n"));
+  assert.equal(out.length, 2);
+  const [a] = out;
+  assert.deepEqual(a.env, ["PATH", "SECRET"]);
+  assert.equal(JSON.stringify(out).includes("abc"), false);
+  assert.equal(a.restarts, 4);
+  assert.equal(a.oom, true);
+  assert.equal(a.healthOutput, "connection refused");
+  assert.deepEqual(a.mounts, [{ type: "bind", source: "/host/src", target: "/app/src", rw: true }, { type: "volume", source: "data", target: "/data", rw: false }]);
+  assert.deepEqual(a.networks, [{ name: "net", ip: "172.18.0.2" }]);
+  assert.deepEqual(Object.keys(a.labels), ["com.docker.compose.project"]);
+});
+
+test("why says what is wrong in one line", () => {
+  const c = (o) => ({ state: "exited", exitCode: 1, health: null, oom: false, error: "", healthOutput: "", ...o });
+  assert.equal(m.why(null), "");
+  assert.equal(m.why(c({ state: "running" })), "");
+  assert.equal(m.why(c({ exitCode: 0 })), "");
+  assert.equal(m.why(c({})), "exited 1");
+  assert.equal(m.why(c({ exitCode: 137, oom: true })), "exited 137, out of memory");
+  assert.equal(m.why(c({ exitCode: 137 })), "exited 137, killed");
+  assert.equal(m.why(c({ exitCode: 127 })), "exited 127, its command was not found");
+  assert.equal(m.why(c({ error: "failed to create task: no such file" })), "failed to create task: no such file");
+  assert.equal(m.why(c({ state: "running", health: "unhealthy", healthOutput: "curl: (7)\nconnection refused" })), "health check: connection refused");
+  assert.equal(m.why(c({ state: "running", health: "unhealthy" })), "health check is failing");
+});
+
+test("three exits inside a minute are a restart loop, with one toast", () => {
+  const at = (s) => `2026-11-16T10:00:${String(s).padStart(2, "0")}Z`, t0 = Date.parse(at(0));
+  let seen = m.noteExits(undefined, { finishedAt: at(0), restarts: 0 });
+  assert.deepEqual(seen.times, []); // first sight counts nothing
+  seen = m.noteExits(seen, { finishedAt: at(0), restarts: 0 });
+  assert.deepEqual(seen.times, []);
+  seen = m.noteExits(seen, { finishedAt: at(10), restarts: 1 });
+  seen = m.noteExits(seen, { finishedAt: at(20), restarts: 2 });
+  assert.equal(m.looping(seen.times, t0 + 21000), false);
+  seen = m.noteExits(seen, { finishedAt: at(30), restarts: 3 });
+  assert.equal(m.looping(seen.times, t0 + 31000), true);
+  assert.equal(m.looping(seen.times, t0 + 200000), false); // it stopped looping
+  // Several restarts between two looks all count.
+  assert.equal(m.noteExits({ finishedAt: at(0), restarts: 0, times: [] }, { finishedAt: at(5), restarts: 3 }).times.length, 3);
+  assert.equal(m.statusOf({ state: "running", health: null }, true).text, "restart loop");
+
+  const stacks = ["shop-local"], dead = container({ state: "exited", exitCode: 1, health: null }), name = dead.name;
+  const first = m.toasts([container()], [dead], stacks, new Set(), new Set([name]), new Set());
+  assert.deepEqual(first.map((t) => t.kind), ["loop"]);
+  assert.deepEqual(m.toasts([container()], [dead], stacks, new Set(), new Set([name]), new Set([name])), []);
+});
+
+test("brief tells an agent what failed, with no environment values, and pickSpace finds its space", () => {
+  const c = { name: "p-web-1", image: "p-web", state: "exited", exitCode: 3, health: null, restarts: 2, oom: false, error: "", healthOutput: "",
+    command: "npm run dev", ports: [{ host: 3000, container: "3000/tcp" }], env: ["SECRET"] };
+  const row = { name: "web", actual: { path: "/wt/feat/web", branch: "feat" } };
+  const text = m.brief({ stack: { name: "p", compose: "/s/compose.yml" }, row, container: c, lines: ["one", "x".repeat(900), "boom"], loop: true });
+  assert.match(text, /"web" in the compose project "p" is failing/);
+  assert.match(text, /Problem: exited 3/);
+  assert.match(text, /in a restart loop/);
+  assert.match(text, /Runs from: \/wt\/feat\/web \(branch feat\)/);
+  assert.match(text, /Its last 3 log lines:\none\n/);
+  assert.equal(text.includes("SECRET"), false);
+  assert.ok(text.split("\n").every((l) => l.length <= 401));
+  assert.match(m.brief({ stack: null, row: { name: "x" }, container: c, lines: [] }), /It wrote no log lines\./);
+
+  const spaces = [{ id: 1, machine: null, folder: "/wt/feat/web", branch: "feat" }, { id: 2, machine: "wsl", folder: "/home/me", branch: "feat" }, { id: 3, machine: "wsl", folder: "/wt/feat/web/src", branch: "other" }];
+  assert.equal(m.pickSpace(spaces, "wsl", "/wt/feat/web", "feat").id, 3); // the folder wins over the branch
+  assert.equal(m.pickSpace(spaces, "wsl", "/elsewhere", "feat").id, 2);
+  assert.equal(m.pickSpace(spaces, null, "/wt/feat/web", null).id, 1);
+  assert.equal(m.pickSpace(spaces, "wsl", "/elsewhere", "nope"), null);
+});

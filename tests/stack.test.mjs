@@ -68,6 +68,8 @@ services:
     build:
       context: \${API_PATH:-../api}
     stop_grace_period: 0s
+    environment:
+      DOCKR_SECRET: hunter2-value
 `);
   state.appHome = join(root, "home");
   mkdirSync(state.appHome);
@@ -97,6 +99,36 @@ test("Up brings the Stack up from the Main checkouts, with no Drift and no .dock
   assert.equal(row("api").actual, null); // Not mounted and not built by Dockr yet: unknown.
   assert.equal(existsSync(join(root, "stack", ".dockr.env")), false);
   assert.equal(who(), "main");
+});
+
+test("no environment value reaches Dockr, only the names", opts, async () => {
+  const r = await docker.snapshot(null);
+  const api = r.containers.find((c) => c.name === `${NAME}-api-1`);
+  assert.ok(api.env.includes("DOCKR_SECRET"));
+  assert.equal(JSON.stringify(r).includes("hunter2-value"), false);
+  assert.ok(api.networks.length > 0);
+  const web = r.containers.find((c) => c.name === `${NAME}-web-1`);
+  assert.ok(web.mounts.some((x) => x.target === "/app/src"));
+});
+
+test("a container that fails says why, with its last lines", opts, async () => {
+  const name = `${NAME}-crash`;
+  sh(root, "docker", "run", "-d", "--name", name, "--label", `com.docker.compose.project=${NAME}`, "--label", "com.docker.compose.service=crash", "busybox:1.36", "sh", "-c", "echo one; echo two; echo boom >&2; exit 3");
+  try {
+    spawnSync("docker", ["wait", name], { stdio: "ignore" });
+    await look();
+    const c = row("crash").container;
+    assert.equal(model.why(c), "exited 3");
+    assert.deepEqual(store.tail(c).sort(), ["boom", "one", "two"]);
+    const sick = `${NAME}-sick`;
+    sh(root, "docker", "run", "-d", "--name", sick, "--label", `com.docker.compose.project=${NAME}`, "--label", "com.docker.compose.service=sick",
+      "--health-cmd", "echo no database; exit 1", "--health-interval", "1s", "--health-retries", "1", "busybox:1.36", "sh", "-c", "while true; do sleep 1; done");
+    try {
+      for (let i = 0; i < 40 && row("sick")?.container?.health !== "unhealthy"; i++) { spawnSync("sleep", ["0.5"]); await look(); }
+      assert.equal(model.why(row("sick").container), "health check: no database");
+    } finally { spawnSync("docker", ["rm", "-f", sick], { stdio: "ignore" }); }
+  } finally { spawnSync("docker", ["rm", "-f", name], { stdio: "ignore" }); }
+  await look();
 });
 
 test("costs says which checkouts need a rebuild before anything is switched", opts, async () => {

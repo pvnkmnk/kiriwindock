@@ -136,16 +136,27 @@ export function desktopBinds(psText) {
   return out;
 }
 
+/** Text without terminal colour and cursor codes. */
+export const clean = (text) => String(text ?? "").replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\r/g, "");
+
 /**
- * Containers from `docker inspect` JSON, with only what Dockr shows.
+ * Containers from `docker inspect` output (one JSON object per line, or one array), with only what Dockr shows.
+ * Environment entries are kept as names only, whatever the input holds.
  * `binds`: desktopBinds() of the same containers. Docker Desktop hides a WSL bind behind an opaque
  * mount path and names the real one in a label that only `docker ps` prints.
  */
 export function parseContainers(json, binds = {}) {
-  let list;
-  try { list = typeof json === "string" ? JSON.parse(json) : json; } catch { return []; }
+  let list = json;
+  if (typeof json === "string") {
+    try { list = JSON.parse(json); } catch {
+      list = json.split(/\r?\n/).map((l) => { try { return JSON.parse(l); } catch { return null; } }).filter((x) => x && typeof x === "object");
+    }
+  }
+  if (list && !Array.isArray(list) && typeof list === "object" && list.Id) list = [list];
   if (!Array.isArray(list)) return [];
   return list.map((c) => {
+    const checks = c.State?.Health?.Log ?? [];
+    let bind = 0;
     const labels = c.Config?.Labels ?? {};
     const named = binds[c.Id] ?? [];
     const sources = named.length ? named : (c.Mounts ?? []).filter((m) => m.Type === "bind").map((m) => m.Source);
@@ -159,6 +170,13 @@ export function parseContainers(json, binds = {}) {
       state: c.State?.Status ?? "unknown", exitCode: c.State?.ExitCode ?? 0, health: c.State?.Health?.Status ?? null,
       created: c.Created ?? "", project: labels["com.docker.compose.project"] ?? null, service: labels["com.docker.compose.service"] ?? null,
       binds: sources, ports, command: [c.Path, ...(c.Args ?? [])].filter(Boolean).join(" "),
+      restarts: c.RestartCount ?? 0, oom: !!c.State?.OOMKilled, error: c.State?.Error || "",
+      startedAt: c.State?.StartedAt ?? "", finishedAt: c.State?.FinishedAt ?? "",
+      healthOutput: checks.length ? clean(checks[checks.length - 1]?.Output).trim() : "",
+      mounts: (c.Mounts ?? []).map((m) => ({ type: m.Type ?? "", source: m.Type === "bind" ? named[bind++] ?? m.Source ?? "" : m.Name ?? m.Source ?? "", target: m.Destination ?? "", rw: m.RW !== false })),
+      networks: Object.entries(c.Networks ?? c.NetworkSettings?.Networks ?? {}).map(([name, n]) => ({ name, ip: n?.IPAddress ?? "" })),
+      labels: Object.fromEntries(Object.entries(labels).filter(([k]) => !k.startsWith("desktop.docker.io/"))),
+      env: (c.Config?.Env ?? []).map((e) => String(e).split("=")[0]).sort(),
     };
   });
 }
@@ -272,8 +290,9 @@ export const q = (s) => `'${String(s).replace(/'/g, "'\\''")}'`;
 /**
  * The toasts a change of containers earns. `prev` null (the first look) earns none.
  * `stacks`: names of configured Stacks. `quiet`: container names the user just acted on.
+ * `loops`: names in a restart loop now, `wasLoops`: at the last look. A loop earns one toast, not one per exit.
  */
-export function toasts(prev, next, stacks, quiet = new Set()) {
+export function toasts(prev, next, stacks, quiet = new Set(), loops = new Set(), wasLoops = new Set()) {
   if (!prev) return [];
   const before = new Map(prev.map((c) => [c.name, c]));
   const out = [];
@@ -281,8 +300,12 @@ export function toasts(prev, next, stacks, quiet = new Set()) {
     if (!c.project || !stacks.includes(c.project) || quiet.has(c.name)) continue;
     const was = before.get(c.name) ?? null;
     const name = c.service ?? c.name;
-    if (c.health === "unhealthy" && was?.health !== "unhealthy") out.push({ kind: "unhealthy", name, stack: c.project, title: `${name} is unhealthy`, level: "warning" });
-    else if (c.state === "exited" && c.exitCode !== 0 && was && was.state !== "exited") out.push({ kind: "exited", name, stack: c.project, title: `${name} exited ${c.exitCode}`, level: "error" });
+    if (loops.has(c.name)) {
+      if (!wasLoops.has(c.name)) out.push({ kind: "loop", name, stack: c.project, title: `${name} keeps restarting`, body: why(c), level: "error" });
+      continue;
+    }
+    if (c.health === "unhealthy" && was?.health !== "unhealthy") out.push({ kind: "unhealthy", name, stack: c.project, title: `${name} is unhealthy`, body: why(c), level: "warning" });
+    else if (c.state === "exited" && c.exitCode !== 0 && was && was.state !== "exited") out.push({ kind: "exited", name, stack: c.project, title: `${name} exited ${c.exitCode}`, body: why(c), level: "error" });
     else if (up(c) && !up(was)) out.push({ kind: "started", name, stack: c.project, title: `${name} started`, level: "success" });
   }
   return out;
@@ -356,13 +379,48 @@ export function adoptChanges(rows, targets) {
 }
 
 /** What a row says about its container: { kind: "up" | "starting" | "bad" | "off", text }. Text is empty when all is well. */
-export function statusOf(c) {
+export function statusOf(c, loop = false) {
   if (!c) return { kind: "off", text: "not created" };
+  if (loop) return { kind: "bad", text: "restart loop" };
   if (c.health === "unhealthy") return { kind: "bad", text: "unhealthy" };
   if (c.state === "exited") return c.exitCode !== 0 ? { kind: "bad", text: `exited ${c.exitCode}` } : { kind: "off", text: "stopped" };
   if (c.state === "running") return c.health === "starting" ? { kind: "starting", text: "waiting for healthy" } : { kind: "up", text: "" };
   if (c.state === "restarting") return { kind: "starting", text: "restarting" };
   return { kind: "off", text: c.state };
+}
+
+const EXITS = { 126: "its command cannot run", 127: "its command was not found", 137: "killed", 139: "crashed (segmentation fault)", 143: "terminated" };
+
+/** Why a container is not well, in one line. Empty when it is. */
+export function why(c) {
+  if (!c) return "";
+  if (c.state === "running" && c.health === "unhealthy") {
+    const said = String(c.healthOutput ?? "").split(/\r?\n/).filter(Boolean).pop();
+    return said ? `health check: ${said}` : "health check is failing";
+  }
+  if (c.state !== "exited" && c.state !== "dead" && c.state !== "restarting") return "";
+  if (c.state === "exited" && c.exitCode === 0) return "";
+  if (c.oom) return `exited ${c.exitCode}, out of memory`;
+  if (c.error) return c.error;
+  return EXITS[c.exitCode] ? `exited ${c.exitCode}, ${EXITS[c.exitCode]}` : `exited ${c.exitCode}`;
+}
+
+/** Whether exit times (ms) show a restart loop: `count` of them inside `windowMs`, the last one recent. */
+export function looping(times, now, count = 3, windowMs = 60000) {
+  return (times ?? []).filter((t) => now - t <= windowMs).length >= count;
+}
+
+/**
+ * Adds a container's new exits to `seen` ({ finishedAt, restarts, times }) and returns it.
+ * The first sight of a container records where it stands and counts nothing.
+ */
+export function noteExits(seen, c) {
+  const at = Date.parse(c.finishedAt);
+  const ended = Number.isFinite(at) && at > 0 ? at : null;
+  if (!seen) return { finishedAt: c.finishedAt, restarts: c.restarts, times: [] };
+  const more = Math.max((c.restarts ?? 0) - (seen.restarts ?? 0), c.finishedAt !== seen.finishedAt && ended ? 1 : 0);
+  const times = more > 0 ? [...seen.times, ...Array(Math.min(more, 5)).fill(ended ?? Date.now())].slice(-10) : seen.times;
+  return { finishedAt: c.finishedAt, restarts: c.restarts, times };
 }
 
 /** The terminals Dockr started that still run, from Herdr's terminal list. */
@@ -430,4 +488,54 @@ export function explain(text, machine = null) {
   if (/no such file or directory/i.test(s) && /\.ya?ml|compose/i.test(s)) return "The compose file is not where dockr.json says it is.";
   if (/unreachable|not connected|no such machine/i.test(s)) return `Herdr cannot reach${machine ? ` ${machine}` : " that Machine"}. Connect it, then press Reload.`;
   return s.trim().split(/\r?\n/).pop() ?? "";
+}
+
+/**
+ * What an agent is told about a failing container. It holds what Docker reports and the last log
+ * lines, and no environment values.
+ */
+export function brief({ stack, row, container: c, lines, loop }) {
+  const src = row?.actual ?? row?.set ?? null;
+  const facts = [
+    `Container: ${c.name}`,
+    `Image: ${c.image}`,
+    `State: ${c.state}${c.health ? `, health ${c.health}` : ""}${loop ? ", in a restart loop" : ""}`,
+    `Problem: ${why(c) || (loop ? "it keeps restarting" : "not known")}`,
+    `Restarts: ${c.restarts ?? 0}`,
+    c.healthOutput ? `Health check output: ${c.healthOutput.split(/\r?\n/).filter(Boolean).slice(-3).join(" | ")}` : null,
+    c.command ? `Command: ${c.command}` : null,
+    c.ports?.length ? `Published ports: ${c.ports.map((p) => `${p.host}->${p.container}`).join(", ")}` : null,
+    src ? `Runs from: ${src.path}${src.branch ? ` (branch ${src.branch})` : ""}` : null,
+    stack?.compose ? `Compose file: ${stack.compose}` : null,
+  ].filter(Boolean);
+  const log = (lines ?? []).slice(-100).map((l) => (l.length > 400 ? `${l.slice(0, 400)}…` : l));
+  return [
+    `The Docker container for "${row?.name ?? c.name}"${stack ? ` in the compose project "${stack.name}"` : ""} is failing. Find the cause and propose a fix.`,
+    "",
+    "What Docker reports:",
+    ...facts.map((f) => `- ${f}`),
+    "",
+    log.length ? `Its last ${log.length} log lines:` : "It wrote no log lines.",
+    ...log,
+    "",
+    "Rules:",
+    "- Do not run docker compose up, down, build or restart, and do not stop or remove containers. Dockr manages them.",
+    "- Read-only commands such as docker logs and docker inspect are fine.",
+    "- Do not print environment values or open .env files.",
+    "- Say the cause first, then the fix. Ask before you change files.",
+  ].join("\n");
+}
+
+/**
+ * The space a diagnosing agent's tab belongs in: one on that Machine whose folder is the checkout
+ * or inside it, else one on the same branch. Null when there is none.
+ */
+export function pickSpace(spaces, machine, folder, branch) {
+  const here = (spaces ?? []).filter((s) => (s.machine ?? "") === (machine ?? ""));
+  if (folder) {
+    const f = norm(folder);
+    const by = here.find((s) => s.folder && inside(norm(s.folder), f));
+    if (by) return by;
+  }
+  return (branch && here.find((s) => s.branch === branch)) || null;
 }

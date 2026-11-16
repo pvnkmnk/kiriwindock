@@ -1,0 +1,272 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import * as m from "../mods/dockr/model.js";
+
+const CONFIG = JSON.stringify({
+  stacks: [{
+    name: "shop-local", machine: "wsl", compose: "/mnt/c/dev/shop/deploy/docker-compose.local.yml",
+    services: {
+      gateway: { var: "API_PATH", repo: "ado/api-server", main: "/mnt/c/dev/shop/api-server" },
+      "billing": { var: "BILLING_PATH", repo: "ado/billing", manifests: ["Billing.API/Billing.API.csproj"] },
+    },
+    urls: { "https://app.example.test": "Review UI" },
+  }],
+});
+
+const MAIN = { path: "/mnt/c/dev/shop/api-server", branch: "102-x", head: "a".repeat(40), main: true };
+const WT = { path: "/mnt/c/dev/shop/.worktrees/101-t/api-server", branch: "101-t", head: "b".repeat(40), main: false };
+const stack = () => m.withMains(m.parseConfig(CONFIG).stacks, { repos: { "ado/billing": { on: { wsl: { path: "/mnt/c/dev/shop/billing" } } } } }).stacks[0];
+
+const container = (over = {}) => ({
+  id: "1", name: "shop-local-gateway-1", image: "shop-local-gateway", imageId: "sha256:1", state: "running", exitCode: 0, health: "healthy",
+  created: "", project: "shop-local", service: "gateway", binds: [], ports: [], ...over,
+});
+
+test("norm makes Windows, Docker Desktop and WSL spellings of one path equal", () => {
+  const want = "/mnt/c/dev/shop/api-server";
+  assert.equal(m.norm("C:\\Dev\\shop\\api-server\\"), want);
+  assert.equal(m.norm("/run/desktop/mnt/host/c/dev/shop/api-server"), want);
+  assert.equal(m.norm("/mnt/c/dev/shop/api-server/"), want);
+  assert.equal(m.norm("/home/J/Repo/"), "/home/J/Repo");
+});
+
+test("parseConfig keeps good stacks and names the bad parts", () => {
+  const ok = m.parseConfig(CONFIG);
+  assert.deepEqual(ok.problems, []);
+  assert.equal(ok.stacks[0].dir, "/mnt/c/dev/shop/deploy");
+  assert.deepEqual(ok.stacks[0].services.gateway.manifests, m.DEFAULT_MANIFESTS);
+  assert.deepEqual(m.parseConfig(null), { stacks: [], problems: [] });
+  assert.equal(m.parseConfig("{").problems.length, 1);
+  const bad = m.parseConfig(JSON.stringify({ stacks: [{ name: "a", compose: "rel.yml" }, { name: "b", compose: "/c.yml", services: { s: { var: "1X" }, t: { var: "T", manifests: ["../x"] } }, urls: { "javascript:1": "x" } }] }));
+  assert.equal(bad.stacks.length, 1);
+  assert.deepEqual(Object.keys(bad.stacks[0].services), ["t"]);
+  assert.equal(bad.problems.length, 4);
+});
+
+test("withMains takes a Main checkout from Wranglr when the Service names none", () => {
+  const s = stack();
+  assert.equal(s.services.gateway.main, "/mnt/c/dev/shop/api-server");
+  assert.equal(s.services["billing"].main, "/mnt/c/dev/shop/billing");
+  const none = m.withMains(m.parseConfig(CONFIG).stacks, null);
+  assert.equal(none.stacks[0].services["billing"].main, null);
+  assert.equal(none.problems.length, 1);
+  const ws = { workspaces: [{ on: { wsl: { paths: { "ado/billing": "/ws/billing" } } } }] };
+  assert.equal(m.wranglrMain(ws, "ado/billing", "wsl"), "/ws/billing");
+  assert.equal(m.wranglrMain(ws, "ado/billing", null), null);
+});
+
+test("parseWorktrees lists the Main checkout first and skips prunable ones", () => {
+  const text = `worktree /r/main\nHEAD ${"a".repeat(40)}\nbranch refs/heads/staging\n\nworktree /r/wt1\nHEAD ${"b".repeat(40)}\nbranch refs/heads/46382/14-x\n\nworktree /r/gone\nHEAD ${"c".repeat(40)}\nbranch refs/heads/old\nprunable gitdir file points to non-existent location\n\nworktree /r/det\nHEAD ${"d".repeat(40)}\ndetached\n`;
+  const list = m.parseWorktrees(text);
+  assert.deepEqual(list.map((s) => [s.path, s.branch, s.main]), [["/r/main", "staging", true], ["/r/wt1", "46382/14-x", false], ["/r/det", null, false]]);
+  assert.equal(m.sourceName(list[2]), "dddddddd");
+});
+
+test("setEnv changes only the named lines", () => {
+  const text = "# Dockr\nA=/x\nB=/y\n";
+  assert.equal(m.setEnv(text, { A: null, C: "/z" }), "# Dockr\nB=/y\nC=/z\n");
+  assert.equal(m.setEnv(text, { B: "/q" }), "# Dockr\nA=/x\nB=/q\n");
+  assert.equal(m.setEnv("", { A: null }), "");
+  assert.deepEqual(m.parseEnv('A=/x\n B = "/y z" \n#C=1\n'), { A: "/x", B: "/y z" });
+});
+
+test("parseContainers prefers Docker Desktop's bind labels over its opaque mount paths", () => {
+  const ps = JSON.stringify({ ID: "abc", Labels: "com.docker.compose.service=gateway,desktop.docker.io/binds/2/Source=/mnt/c/dev/shop/.worktrees/101-t/api-server/src,desktop.docker.io/binds/2/SourceKind=hostFile,x=1" }) + "\nnot json\n";
+  assert.deepEqual(m.desktopBinds(ps), { abc: ["/mnt/c/dev/shop/.worktrees/101-t/api-server/src"] });
+  const [c] = m.parseContainers([{
+    Id: "abc", Name: "/shop-local-gateway-1", Image: "sha256:9", Created: "2026",
+    Config: { Image: "shop-local-gateway", Labels: { "com.docker.compose.project": "shop-local", "com.docker.compose.service": "gateway" } },
+    State: { Status: "running", ExitCode: 0, Health: { Status: "healthy" } },
+    Mounts: [{ Type: "bind", Source: "/run/desktop/mnt/host/wsl/docker-desktop-bind-mounts/Ubuntu/92b1" }, { Type: "volume", Source: "/var/lib/docker/volumes/x/_data" }],
+    HostConfig: { PortBindings: { "5858/tcp": [{ HostIp: "127.0.0.1", HostPort: "5858" }], "3010/tcp": [{ HostIp: "127.0.0.1", HostPort: "3010" }] } },
+  }], m.desktopBinds(ps));
+  assert.deepEqual(c.binds, ["/mnt/c/dev/shop/.worktrees/101-t/api-server/src"]);
+  assert.deepEqual(c.ports.map((p) => p.host), [3010, 5858]);
+  assert.equal(c.health, "healthy");
+  assert.equal(m.sourceOf(c, [MAIN, WT]), WT);
+  assert.deepEqual(m.parseContainers("not json"), []);
+  const [plain] = m.parseContainers([{ Id: "d", Name: "/x", Mounts: [{ Type: "bind", Source: "/run/desktop/mnt/host/c/dev/shop/api-server/src" }] }]);
+  assert.equal(m.sourceOf(plain, [MAIN, WT]), MAIN);
+});
+
+test("view shows the real Source and marks Drift against the env file", () => {
+  const s = stack(), sources = { "shop-local/gateway": [MAIN, WT] };
+  const c = container({ binds: [WT.path + "/src"] });
+  const drifted = m.view([s], [c], {}, sources).groups[0].rows.find((r) => r.name === "gateway");
+  assert.equal(drifted.actual, WT);
+  assert.equal(drifted.set, MAIN);
+  assert.equal(drifted.drift, true);
+  assert.equal(drifted.mounted, true);
+  const same = m.view([s], [c], { "shop-local": { API_PATH: WT.path } }, sources).groups[0].rows.find((r) => r.name === "gateway");
+  assert.equal(same.drift, false);
+});
+
+test("view lists configured Services with no container, and containers outside every Stack", () => {
+  const s = stack();
+  const v = m.view([s], [container({ name: "pg", project: null, service: null }), container({ name: "n", service: "nginx" })], {}, {});
+  assert.deepEqual(v.groups[0].rows.map((r) => r.name), ["nginx", "gateway", "billing"]);
+  assert.equal(v.groups[0].rows[1].container, null);
+  assert.deepEqual(v.other.map((r) => r.name), ["pg"]);
+});
+
+test("view takes the Source of an unmounted Service from Dockr's own build record", () => {
+  const s = stack(), key = "shop-local/billing";
+  const sources = { [key]: [{ ...MAIN, path: "/mnt/c/dev/shop/billing" }, { ...WT, path: "/wt/billing" }] };
+  const c = container({ name: "a", service: "billing", imageId: "sha256:7" });
+  const row = (built) => m.view([s], [c], {}, sources, built).groups[0].rows.find((r) => r.name === "billing");
+  assert.equal(row({}).actual, null);
+  assert.equal(row({}).drift, false);
+  assert.equal(row({ [key]: { imageId: "sha256:7", path: "/wt/billing" } }).actual.path, "/wt/billing");
+  assert.equal(row({ [key]: { imageId: "sha256:7", path: "/wt/billing" } }).drift, true);
+  assert.equal(row({ [key]: { imageId: "sha256:other", path: "/wt/billing" } }).actual, null);
+});
+
+test("planSwitch writes a worktree's path and removes the line for the Main checkout", () => {
+  const s = stack();
+  assert.deepEqual(m.planSwitch(s, {}, { gateway: WT }), { changes: { API_PATH: WT.path }, services: ["gateway"] });
+  assert.deepEqual(m.planSwitch(s, { API_PATH: WT.path }, { gateway: MAIN }), { changes: { API_PATH: null }, services: ["gateway"] });
+  assert.deepEqual(m.planSwitch(s, { API_PATH: WT.path }, { gateway: WT }), { changes: {}, services: [] });
+  assert.deepEqual(m.planSwitch(s, {}, { gateway: MAIN }), { changes: {}, services: [] });
+});
+
+test("siblings are the other Services with a worktree on the picked branch", () => {
+  const s = stack();
+  const billingMain = { path: "/mnt/c/dev/shop/billing", branch: "staging", head: "e", main: true };
+  const billingWt = { path: "/wt/101/billing", branch: "101-t", head: "f", main: false };
+  const sources = { "shop-local/gateway": [MAIN, WT], "shop-local/billing": [billingMain, billingWt] };
+  assert.deepEqual(m.siblings(s, sources, "gateway", WT), [{ name: "billing", source: billingWt }]);
+  assert.deepEqual(m.siblings(s, sources, "gateway", MAIN), []);
+  assert.deepEqual(m.siblings(s, sources, "gateway", { ...WT, branch: null }), []);
+  assert.deepEqual(m.siblings(s, { "shop-local/gateway": [MAIN, WT] }, "gateway", WT), []);
+  // A Switch names only the Services that move, so the rest keep their Source.
+  const plan = m.planSwitch(s, { BILLING_PATH: "/wt/103/billing" }, { gateway: WT });
+  assert.deepEqual(plan.changes, { API_PATH: WT.path });
+});
+
+test("needsBuild rebuilds unmounted Services and changed manifests only", () => {
+  assert.equal(m.needsBuild({ mounted: false, hostHash: "a", imageHash: "a" }), true);
+  assert.equal(m.needsBuild({ mounted: true, hostHash: "a", imageHash: "a" }), false);
+  assert.equal(m.needsBuild({ mounted: true, hostHash: "a", imageHash: "b" }), true);
+  assert.equal(m.needsBuild({ mounted: true, hostHash: "a", imageHash: null }), true);
+});
+
+test("composeArgs passes .env before .dockr.env and leaves out a missing file", () => {
+  const s = stack();
+  assert.deepEqual(m.composeArgs(s), ["compose", "-f", s.compose, "--env-file", `${s.dir}/.env`, "--env-file", `${s.dir}/.dockr.env`]);
+  assert.deepEqual(m.composeArgs(s, { env: false, dockr: true }), ["compose", "-f", s.compose, "--env-file", `${s.dir}/.dockr.env`]);
+  assert.equal(m.q("it's"), "'it'\\''s'");
+});
+
+test("toasts fire once per change, for Stack Services only, and never on the first look", () => {
+  const stacks = ["shop-local"];
+  const run = container(), starting = container({ health: "starting" });
+  assert.deepEqual(m.toasts(null, [run], stacks), []);
+  assert.deepEqual(m.toasts([starting], [run], stacks).map((t) => t.kind), ["started"]);
+  assert.deepEqual(m.toasts([run], [run], stacks), []);
+  assert.deepEqual(m.toasts([], [starting], stacks), []);
+  assert.deepEqual(m.toasts([run], [container({ state: "exited", exitCode: 1, health: null })], stacks).map((t) => t.title), ["gateway exited 1"]);
+  assert.deepEqual(m.toasts([run], [container({ state: "exited", exitCode: 0, health: null })], stacks), []);
+  assert.deepEqual(m.toasts([run], [container({ health: "unhealthy" })], stacks).map((t) => t.kind), ["unhealthy"]);
+  assert.deepEqual(m.toasts([container({ health: "unhealthy" })], [container({ health: "unhealthy" })], stacks), []);
+  assert.deepEqual(m.toasts([starting], [run], []), []);
+  assert.deepEqual(m.toasts([run], [container({ state: "exited", exitCode: 137 })], stacks, new Set(["shop-local-gateway-1"])), []);
+});
+
+test("stackUrls puts each link under the Service that serves it", () => {
+  const hosts = "127.0.0.1 app.example.test admin.example.test\n127.0.0.1 localhost\n10.0.0.1 other # x\n";
+  assert.deepEqual(m.localHosts(hosts), ["app.example.test", "admin.example.test"]);
+  const [s] = m.parseConfig(JSON.stringify({ stacks: [{ name: "a", compose: "/c.yml", urls: {
+    "https://app.example.test": { label: "Review UI", service: "web-client" },
+    "http://localhost:3010/api/health": "Gateway health",
+    "https://docs.example.net": "Docs",
+    "https://gone.example.net": { label: "Gone", service: "no-such-service" },
+  } }] })).stacks;
+  const rows = [
+    { name: "nginx", container: container({ ports: [{ host: 443, container: "443/tcp" }] }) },
+    { name: "gateway", container: container({ ports: [{ host: 3010, container: "3010/tcp" }] }) },
+    { name: "web-client", container: container() },
+  ];
+  const u = m.stackUrls(s, rows, hosts);
+  assert.deepEqual(u.byService["web-client"].map((x) => x.label), ["Review UI"]);
+  assert.deepEqual(u.byService.gateway.map((x) => x.label), ["Gateway health"]);
+  assert.deepEqual(u.byService.nginx.map((x) => x.label), ["admin.example.test"]);
+  assert.deepEqual(u.stack.map((x) => x.label), ["Docs", "Gone"]);
+  assert.equal(m.stackUrls(s, rows.slice(1), hosts).byService.nginx, undefined);
+  assert.equal(m.localPort("https://localhost"), 443);
+  assert.equal(m.localPort("http://127.0.0.1:5000/x"), 5000);
+  assert.equal(m.localPort("https://localhost.example.net"), null);
+  assert.equal(m.portUrl(443), "https://localhost");
+  assert.equal(m.portUrl(3010), "http://localhost:3010");
+});
+
+test("modShown follows hidden nodes and a stack's active child", () => {
+  const tree = (hidden, active) => ({ id: "root", type: "row", children: [{ id: "panel", type: "column", hidden, children: [{ id: "body", type: "stack", active, children: [{ id: "files", content: { mod: "files" } }, { id: "dockr", content: { mod: "dockr" } }] }] }] });
+  assert.equal(m.modShown(tree(false, "dockr"), "dockr"), true);
+  assert.equal(m.modShown(tree(true, "dockr"), "dockr"), false);
+  assert.equal(m.modShown(tree(false, "files"), "dockr"), false);
+  assert.equal(m.modShown({ id: "root", children: [] }, "dockr"), true);
+});
+
+test("a Stack with no .dockr.env takes what runs as its record, and the first write keeps it", () => {
+  const s = stack(), sources = { "shop-local/gateway": [MAIN, WT] };
+  const c = container({ binds: [WT.path + "/src"] });
+  const rows = m.view([s], [c], {}, sources, {}, { "shop-local": false }).groups[0].rows;
+  const gateway = rows.find((r) => r.name === "gateway");
+  assert.equal(gateway.set, WT);
+  assert.equal(gateway.drift, false);
+  assert.deepEqual(m.adoptChanges(rows, { "billing": MAIN }), { API_PATH: WT.path });
+  assert.deepEqual(m.adoptChanges(rows, { gateway: MAIN }), {});
+});
+
+test("statusOf is silent when a container is up and says what is wrong otherwise", () => {
+  assert.deepEqual(m.statusOf(container()), { kind: "up", text: "" });
+  assert.deepEqual(m.statusOf(container({ health: "starting" })), { kind: "starting", text: "waiting for healthy" });
+  assert.deepEqual(m.statusOf(container({ health: "unhealthy" })), { kind: "bad", text: "unhealthy" });
+  assert.deepEqual(m.statusOf(container({ state: "exited", exitCode: 137, health: null })), { kind: "bad", text: "exited 137" });
+  assert.deepEqual(m.statusOf(container({ state: "exited", exitCode: 0, health: null })), { kind: "off", text: "stopped" });
+  assert.deepEqual(m.statusOf(null), { kind: "off", text: "not created" });
+});
+
+test("phase follows a build from Herdr's terminals and the container's age", () => {
+  const term = (labels, state = "live") => ({ address: "wsl/t9", state, labels: { "dockr.stack": "shop-local", "dockr.kind": "op", "dockr.at": "1000000", ...labels } });
+  const ops = m.parseOps([term({ "dockr.services": "gateway,admin-client", "dockr.build": "gateway" }), term({}, "finished"), { address: "t1", state: "live", labels: {} }]);
+  assert.equal(ops.length, 1);
+  const op = m.opFor(ops, "shop-local", "gateway");
+  assert.equal(m.opFor(ops, "shop-local", "nginx"), null);
+  assert.equal(m.opFor(ops, "shop-local").address, "wsl/t9");
+  const old = container({ created: new Date(900000).toISOString() }), fresh = container({ created: new Date(1000500).toISOString() });
+  assert.equal(m.phase("gateway", op, old).text, "building");
+  assert.equal(m.phase("admin-client", op, old).text, "recreating");
+  assert.equal(m.phase("gateway", op, { ...fresh, health: "starting" }).text, "waiting for healthy");
+  assert.equal(m.phase("gateway", op, fresh).text, "starting");
+  assert.equal(m.phase("gateway", null, old), null);
+  const failed = m.parseOps([term({ "dockr.services": "gateway", "dockr.failed": "17" })])[0];
+  assert.deepEqual(m.phase("gateway", failed, old), { failed: true, text: "failed (exit 17)" });
+  assert.equal(m.phase("gateway", m.parseOps([term({ "dockr.services": "gateway", "dockr.verb": "down" })])[0], old).text, "stopping");
+});
+
+test("costOf, suggestion and shortBranch", () => {
+  assert.equal(m.costOf({ current: true, mounted: true }), "current");
+  assert.equal(m.costOf({ current: false, mounted: true, hostHash: "a", imageHash: "a" }), "recreate");
+  assert.equal(m.costOf({ current: false, mounted: true, hostHash: "a", imageHash: "b" }), "rebuild");
+  assert.equal(m.costOf({ current: false, mounted: false }), "rebuild");
+  const row = { service: { var: "X" }, sources: [MAIN, WT], set: MAIN };
+  assert.equal(m.suggestion(row, "101-t"), WT);
+  assert.equal(m.suggestion({ ...row, set: WT }, "101-t"), null);
+  assert.equal(m.suggestion(row, "102-x"), null);
+  assert.equal(m.suggestion(row, null), null);
+  assert.equal(m.shortBranch("301-add-search"), "301");
+  assert.equal(m.shortBranch("46382/14-arabic"), "46382");
+  assert.equal(m.shortBranch("feature/12345-x"), "12345");
+  assert.equal(m.shortBranch("staging"), "staging");
+});
+
+test("programIcon and explain", () => {
+  assert.equal(m.programIcon({ image: "nginx:1.29-alpine", command: "nginx -g daemon off;" }), "icons/nginx.svg");
+  assert.equal(m.programIcon({ image: "shop-local-gateway", command: "npm run dev" }), "icons/node.svg");
+  assert.equal(m.programIcon({ image: "shop-local-billing", command: "dotnet Billing.API.dll" }), "icons/dotnet.svg");
+  assert.equal(m.programIcon({ image: "mcr.microsoft.com/mssql/server", command: "/opt/mssql/bin/sqlservr" }), "icons/docker.svg");
+  assert.match(m.explain("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?", "wsl"), /^Docker is not running on wsl\./);
+  assert.match(m.explain("Bind for 127.0.0.1:3010 failed: port is already allocated"), /^Port 3010 is already in use/);
+  assert.equal(m.explain("line one\nno configuration file provided: not found\n"), "no configuration file provided: not found");
+});

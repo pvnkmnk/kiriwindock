@@ -153,6 +153,15 @@ test("the log wait returns new lines without losing or repeating any, and says w
   } finally { spawnSync("docker", ["rm", "-f", name], { stdio: "ignore" }); }
 });
 
+test("the stats wait returns one sample that names the running containers", opts, async () => {
+  const r = await docker.waitStats(null);
+  assert.equal(r.error, undefined);
+  const s = model.parseStats(r.text);
+  assert.ok(s[`${NAME}-web-1`], Object.keys(s).join(","));
+  assert.ok(s[`${NAME}-web-1`].mem > 0);
+  assert.ok(s[`${NAME}-web-1`].cpu >= 0);
+});
+
 test("costs says which checkouts need a rebuild before anything is switched", opts, async () => {
   const r = row("web");
   const costs = await store.costs(store.stack(NAME), { sources: r.sources, runs: r.actual.path, mounted: r.mounted, image: r.container.image, manifests: r.service.manifests });

@@ -595,3 +595,42 @@ export function clock(at) {
   const p = (n, w = 2) => String(n).padStart(w, "0");
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}.${p(d.getMilliseconds(), 3)}`;
 }
+
+const UNITS = { b: 1, kb: 1e3, mb: 1e6, gb: 1e9, tb: 1e12, kib: 1024, mib: 1024 ** 2, gib: 1024 ** 3, tib: 1024 ** 4 };
+
+/** "452.7MiB" as bytes. 0 when it is not a size. */
+export function bytes(text) {
+  const m = /^([\d.]+)\s*([A-Za-z]+)$/.exec(String(text ?? "").trim());
+  return m ? Number(m[1]) * (UNITS[m[2].toLowerCase()] ?? 0) : 0;
+}
+
+/** Bytes as a short size: 452M, 1.4G. */
+export function size(n) {
+  if (!(n > 0)) return "0";
+  const steps = [["T", 1024 ** 4], ["G", 1024 ** 3], ["M", 1024 ** 2], ["K", 1024]];
+  for (const [unit, by] of steps) if (n >= by) { const v = n / by; return `${v >= 100 || unit === "M" || unit === "K" ? Math.round(v) : v.toFixed(1)}${unit}`; }
+  return `${Math.round(n)}B`;
+}
+
+/** One sample from Docker's stats stream, by container name: { name: { cpu, mem, limit, net, disk } }. */
+export function parseStats(text) {
+  const out = {};
+  for (const raw of clean(text).split("\n")) {
+    const f = raw.trim().split("|");
+    if (f.length < 6 || !f[1]) continue;
+    const cpu = parseFloat(f[2]), [mem, limit] = f[3].split("/").map((x) => bytes(x));
+    if (Number.isNaN(cpu)) continue;
+    out[f[1]] = { cpu, mem, limit: limit ?? 0, net: f[4].trim(), disk: f[5].trim() };
+  }
+  return out;
+}
+
+/** `history` ({ name: samples }) with one more sample each, keeping the last `keep` and dropping containers that are gone. */
+export function addStats(history, sample, keep = 60) {
+  const out = {};
+  for (const [name, s] of Object.entries(sample)) out[name] = [...(history[name] ?? []), s].slice(-keep);
+  return out;
+}
+
+/** CPU percent and memory as a row shows them: "24% · 236M". */
+export const usage = (s) => (s ? `${s.cpu >= 10 ? Math.round(s.cpu) : s.cpu.toFixed(1)}% · ${size(s.mem)}` : "");

@@ -110,6 +110,24 @@ export async function waitStart(machine, name) {
   return r.code === 0 ? { started: r.stdout.includes("started") } : { error: said(r) };
 }
 
+// Prints one sample of every running container from Docker's stats stream. $1: the longest wait.
+const STATS = `
+coproc D { exec docker stats --format '{{.ID}}|{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}' 2>/dev/null; }
+out=""; seen=0
+while IFS= read -r -t "$1" line <&"\${D[0]}"; do
+  case "$line" in *$'\\033[H'*) [ $seen -eq 1 ] && [ -n "$out" ] && break; seen=1; out="" ;; esac
+  out="$out$line"$'\\n'
+done
+kill "$D_PID" 2>/dev/null
+printf '%s' "$out"
+`;
+
+/** One sample of CPU and memory for every running container: { text } or { error }. Takes about two seconds. */
+export async function waitStats(machine) {
+  const r = await exec("bash", ["-c", STATS, "dockr", "30"], { ...on(machine), timeout: 60000 }).catch(failed);
+  return r.code === 0 ? { text: r.stdout } : { error: said(r) };
+}
+
 /** A Repo's checkouts, the Main checkout first. Empty when git fails there. */
 export async function worktrees(machine, main) {
   const r = await exec("git", ["-C", main, "worktree", "list", "--porcelain"], on(machine)).catch(failed);

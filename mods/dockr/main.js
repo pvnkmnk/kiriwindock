@@ -42,6 +42,9 @@ export default class Dockr extends View {
     this.hover = null;         // the row under the pointer
     this.pendingDown = null;   // the Stack a confirm dialog is asking about
     this.told = new Set();     // failed builds already announced
+    this.stats = {};           // container name -> its last CPU and memory samples, while the panel shows
+    this.sampling = new Set(); // machines with a stats wait running
+    this.statsOff = new Set(); // machines whose stats wait could not run
     this.folded = load("folded", { "": true });
     this.startStopped = localStorage.getItem("start") === "1";
     this.seenRequest = shared(REQUEST)?.n ?? 0;
@@ -67,6 +70,7 @@ export default class Dockr extends View {
   }
 
   async reload(cx) {
+    this.statsOff.clear();
     this.post(await this.store.reload());
     for (const m of this.store.machines()) this.watch(cx, m);
     cx.notify();
@@ -92,6 +96,26 @@ export default class Dockr extends View {
         this.post(await this.store.look(machine));
         cx.notify();
       }
+    });
+  }
+
+  /** CPU and memory samples from one Machine, only while the panel is shown. Each wait is one sample. */
+  sample(cx, machine) {
+    if (this.sampling.has(machine) || this.statsOff.has(machine)) return;
+    this.sampling.add(machine);
+    cx.spawn(async (cx) => {
+      try {
+        while (model.modShown(layout(), "dockr")) {
+          const r = await docker.waitStats(machine || null);
+          if (r.error) { this.statsOff.add(machine); return; } // Reload tries again
+          const now = model.parseStats(r.text);
+          const mine = new Set((this.store.byMachine[machine] ?? []).map((c) => c.name));
+          const rest = Object.fromEntries(Object.entries(this.stats).filter(([n]) => !mine.has(n)));
+          const here = Object.fromEntries(Object.entries(this.stats).filter(([n]) => mine.has(n)));
+          this.stats = { ...rest, ...model.addStats(here, now) };
+          cx.notify();
+        }
+      } finally { this.sampling.delete(machine); }
     });
   }
 
@@ -343,6 +367,9 @@ export default class Dockr extends View {
         .when(!!op, (el) => el.child(this.iconButton(t, `out-${id}`, "output", "Show the output", () => this.peek(op.address, op.title, true)))));
     } else if (st.text) {
       head.child(div().flex_none().pr(4).text_size(11).text_color(st.kind === "bad" ? t.ansi1 : t.dim).child(st.text));
+    } else if (running && this.stats[c.name]?.length) {
+      const now = this.stats[c.name][this.stats[c.name].length - 1];
+      head.child(div().flex_none().pr(4).text_size(10.5).text_color(now.cpu >= 90 ? t.ansi3 : t.dim).child(model.usage(now)));
     }
 
     if (!open && !urls.length && !cause) return head;
@@ -387,6 +414,19 @@ export default class Dockr extends View {
             .tooltip(`${model.portUrl(p.host)} (container ${p.container})`)
             .on_click(() => docker.openUrl(model.portUrl(p.host))).child(String(p.host))))));
     }
+    const samples = c ? this.stats[c.name] ?? [] : [];
+    if (samples.length) {
+      const last = samples[samples.length - 1];
+      const bars = (label, values, top, text, color) => h_flex().gap(6).items_center().text_size(11)
+        .child(div().w(58).flex_none().text_color(t.dim).child(label))
+        .child(h_flex().w(122).h(18).flex_none().gap(0).items_end().children(values.map((v) =>
+          div().w(2).flex_none().h(Math.max(1, Math.round((Math.min(v, top) / top) * 18))).bg(color))))
+        .child(div().flex_1().min_w(0).truncate().text_color(t.muted).child(text));
+      const cpus = samples.map((x) => x.cpu), mems = samples.map((x) => x.mem);
+      out.child(bars("CPU", cpus, Math.max(100, ...cpus), `${last.cpu.toFixed(1)}%`, t.ansi4));
+      out.child(bars("Memory", mems, Math.max(1, ...mems) * 1.15, `${model.size(last.mem)}${last.limit ? ` of ${model.size(last.limit)}` : ""}`, t.ansi5));
+      out.child(line("I/O", `net ${last.net} · disk ${last.disk}`));
+    }
     // Lists: the row shows them on one line, the tooltip one per line.
     const list = (label, items) => items.length && out.child(h_flex().gap(6).text_size(11)
       .child(div().w(58).flex_none().text_color(t.dim).child(label))
@@ -411,7 +451,7 @@ export default class Dockr extends View {
         .child(div().min_w(0).truncate().font_semibold().text_color(t.foreground).child(name))
         .child(h_flex().flex_none().gap(2).items_center().children(g.rows.map((r) =>
           div().w(9).h(4).rounded(2).bg(this.statusColor(t, this.store.status(r.container).kind)))))
-        .child(div().flex_none().text_size(11).text_color(t.dim).child(`${g.running} up${g.stack.machine ? ` · ${g.stack.machine}` : ""}`)))
+        .child(div().flex_none().text_size(11).text_color(t.dim).child(`${g.running} up${g.stack.machine ? ` · ${g.stack.machine}` : ""}${this.totals(g.rows)}`)))
       .when(!!this.busy[name] || (!!op && op.failed == null), (el) => el.child(svg(icon("spinner")).size(12).flex_none().text_color(t.working).spin(900)))
       .when(g.rows.some((r) => r.container), (el) => el.child(this.iconButton(t, `logs-${id}`, "logs", "Logs of every Service, in time order", () => this.openLogs(`Logs · ${name}`, name, g.stack.machine, g.rows, null), t.dim)))
       .when(down, (el) => el.child(this.button(t, `up-${id}`, "Up", async (cx) => this.runOp(cx, await this.store.prepareStack(name, "up")), { primary: true, tip: "Start every Service that is not running" })))
@@ -420,6 +460,17 @@ export default class Dockr extends View {
     if (folded) return out;
     if (urls.stack.length) out.child(this.links(t, id, urls.stack).px(10).pb(4));
     return out.children(g.rows.map((r) => this.renderRow(t, r, urls.byService[r.name] ?? [], ops, branch)));
+  }
+
+  /** A Stack's CPU and memory in all, for its header. Empty before the first sample. */
+  totals(rows) {
+    let cpu = 0, mem = 0, any = false;
+    for (const r of rows) {
+      const s = r.container && this.stats[r.container.name];
+      if (!s?.length) continue;
+      any = true; cpu += s[s.length - 1].cpu; mem += s[s.length - 1].mem;
+    }
+    return any ? ` · ${Math.round(cpu)}% · ${model.size(mem)}` : "";
   }
 
   fold(cx, name) {
@@ -444,6 +495,7 @@ export default class Dockr extends View {
     const shown = model.modShown(layout(), "dockr");
     if (shown && !this.wasShown) cx.spawn(async (cx) => { await this.reload(cx); });
     this.wasShown = shown;
+    if (shown) for (const m of Object.keys(this.store.byMachine)) this.sample(cx, m);
     this.takeRequest(cx);
 
     const ops = this.ops(), branch = this.branch();

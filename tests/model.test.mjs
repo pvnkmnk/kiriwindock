@@ -371,3 +371,24 @@ test("parseLogs, addLogs and matcher", () => {
   assert.equal(m.matcher("/(/"), null);
   assert.match(m.clock("2026-11-16T10:00:00.123456789Z"), /^\d\d:\d\d:00\.123$/);
 });
+
+test("parseStats, addStats, size and usage", () => {
+  const text = "\u001b[J\u001b[H075c|p-web-1|2.42%|453.1MiB / 15.35GiB|17.1MB / 32.9MB|4.8MB / 245MB\u001b[K\ndf8d|p-db-1|124.50%|1.409GiB / 15.35GiB|1kB / 2kB|0B / 0B\u001b[K\n\u001b[K\nbad line\nx|y|--|-- / --|a|b\n";
+  const s = m.parseStats(text);
+  assert.deepEqual(Object.keys(s), ["p-web-1", "p-db-1"]);
+  assert.equal(s["p-web-1"].cpu, 2.42);
+  assert.equal(Math.round(s["p-web-1"].mem / 1024 / 1024), 453);
+  assert.equal(s["p-web-1"].net, "17.1MB / 32.9MB");
+  assert.equal(m.usage(s["p-web-1"]), "2.4% · 453M");
+  assert.equal(m.usage(s["p-db-1"]), "125% · 1.4G");
+  assert.equal(m.usage(undefined), "");
+  assert.equal(m.size(0), "0");
+  assert.equal(m.size(512), "512B");
+  assert.equal(m.bytes("1.5kB"), 1500);
+
+  let h = m.addStats({}, s);
+  h = m.addStats(h, { "p-web-1": { cpu: 3, mem: 1 } }, 2); // p-db-1 is gone
+  assert.deepEqual(Object.keys(h), ["p-web-1"]);
+  h = m.addStats(h, { "p-web-1": { cpu: 4, mem: 1 } }, 2);
+  assert.deepEqual(h["p-web-1"].map((x) => x.cpu), [3, 4]);
+});

@@ -9,7 +9,9 @@ A dialog for Herdr that lists Docker containers and sets which checkout each com
 3. Write `~/.config/herdr-app/dockr.json` (below).
 4. Run `herdr-app check ~/.config/herdr-app/mods/dockr`.
 
-Dockr runs only while its dialog is open, so it posts no toasts while closed.
+**Toasts.** The dialog only runs while it is open. For notices while it is closed, add Dockr's mark to your layout, for example beside the status bar:
+`{ "id": "dockr-chip", "type": "block", "size": { "px": 64 }, "content": { "mod": "dockr", "props": { "chip": true } } }`
+The mark shows how many containers run and turns red when one has failed. It watches Docker's events and posts a toast when a Stack's service starts, exits with an error, turns unhealthy or keeps restarting. A click opens the dialog. While the dialog is open the mark posts nothing.
 
 ## The config file
 

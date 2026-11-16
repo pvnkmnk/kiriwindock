@@ -20,6 +20,7 @@ import { legend } from "./kit/legend.js";
 import { assignLetters, letterBadge, navigateByLetter } from "./kit/letters.js";
 
 const icon = (name) => `mods/dockr/icons/${name}.svg`;
+const OPEN = "dockr.open"; // true while the dialog is open: the status bar's copy then posts no toasts
 const REQUEST = "dockr.request"; // the picker's ask, handed to the panel through shared state
 const load = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback; } catch { return fallback; } };
 const idOf = (s) => String(s).replace(/[^A-Za-z0-9_-]/g, "_");
@@ -44,7 +45,9 @@ export default class Dockr extends View {
     // Opened by its key (mod.open): the list is a dialog, which has the keyboard while it is open.
     // In a layout block it still draws, and takes keys when Herdr hands it the keyboard.
     this.modal = props()?.overlay != null;
-    if (this.modal) this.handle.focus();
+    if (this.modal) { this.handle.focus(); setShared(OPEN, true); }
+    // In the status bar (props { chip: true }): a small mark that stays alive to watch Docker and post the toasts.
+    this.chip = !!props()?.chip;
 
     this.store = new Store(load("built", {}), (built) => localStorage.setItem("built", JSON.stringify(built)));
     this.watching = new Set(); // machines with an event wait running
@@ -86,7 +89,7 @@ export default class Dockr extends View {
         this.noteHidden();
         if (c === "reload") await this.reload(cx);
         else if (c === "focus") this.enterKeys();
-        else if (c === "disk" || c === "logs") { const g = this.groups().find((x) => x.managed) ?? this.groups().find((x) => x.name); if (g) await this.doAction(cx, g.key, c); }
+        else if ((c === "disk" || c === "logs") && !(this.chip && shared(OPEN))) { const g = this.groups().find((x) => x.managed) ?? this.groups().find((x) => x.name); if (g) await this.doAction(cx, g.key, c); }
         else if (c === "downConfirmed" && this.pendingDown) { const name = this.pendingDown; this.pendingDown = null; await this.runOp(cx, await this.store.prepareStack(name, "down")); }
         cx.notify();
       }
@@ -96,7 +99,7 @@ export default class Dockr extends View {
   // The panel: loading
 
   post(toasts) {
-    if (this.visible()) return;
+    if (this.visible() || (this.chip && shared(OPEN))) return;
     for (const t of toasts) notify({ title: t.title, body: t.body ? `${t.stack}: ${t.body}` : t.stack, level: t.level, action: { name: "mod.open", args: { name: "dockr" } } });
   }
 
@@ -164,7 +167,26 @@ export default class Dockr extends View {
   noteHidden() { if (!this.visible()) this.wasShown = false; }
 
   /** The list is on screen: always as a dialog, and in a layout block while that block shows. */
-  visible() { return this.modal || model.modShown(layout(), "dockr"); }
+  visible() { return !this.chip && (this.modal || model.modShown(layout(), "dockr")); }
+
+  /** The dialog has closed: the status bar's copy posts the toasts again. */
+  async close() { if (this.modal) setShared(OPEN, false); }
+
+  /** The status bar's mark: how many containers run, red when one has failed. A click opens the dialog. */
+  renderChip(t) {
+    const all = this.store.containers(), up = all.filter((c) => c.state === "running").length;
+    const bad = all.filter((c) => this.store.status(c).kind === "bad");
+    const deaf = Object.values(this.watchErrors);
+    if (deaf.length) return h_flex().id("dockr-chip").size_full().px(10).gap(6).items_center().justify_center().bg(t.chrome).border_t(1).border_color(t.border)
+      .text_size(11.8).text_color(t.ansi3).cursor_pointer().tooltip(`${deaf.join(" ")} Click to open Dockr.`).on_click(() => run("mod.open", { name: "dockr" }))
+      .child(svg("icons/docker.svg").size(14).flex_none().text_color(t.ansi3)).child(div().child("!"));
+    const tip = bad.length ? `${bad.map((c) => c.name).join(", ")}: ${bad.length === 1 ? "needs" : "need"} a look` : `${up} of ${all.length} containers running`;
+    return h_flex().id("dockr-chip").size_full().px(10).gap(6).items_center().justify_center().bg(t.chrome).border_t(1).border_color(t.border)
+      .text_size(11.8).text_color(bad.length ? t.ansi1 : t.muted).cursor_pointer().hover((x) => x.text_color(t.foreground)).tooltip(`${tip}. Click to open Dockr (ctrl-shift-d)`)
+      .on_click(() => run("mod.open", { name: "dockr" }))
+      .child(svg("icons/docker.svg").size(14).flex_none().text_color(bad.length ? t.ansi1 : t.muted))
+      .child(div().child(all.length ? `${up}/${all.length}` : "0"));
+  }
 
   // The panel: keys, as CodeyPacker's run mod has them
 
@@ -916,6 +938,7 @@ export default class Dockr extends View {
     if (this.logging) return logs.render(this, t);
     if (this.menuing) return menu.render(this, t);
     if (this.disking) return disk.render(this, t);
+    if (this.chip) return this.renderChip(t);
     return this.renderPanel(t, cx);
   }
 }

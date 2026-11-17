@@ -772,6 +772,16 @@ export function keyHints(item, facts = {}) {
   return all.filter(([, what]) => what);
 }
 
+/** Why `git switch` refused, in a sentence. */
+export function gitRefusal(text) {
+  const s = String(text ?? "");
+  if (/would be overwritten by checkout/i.test(s)) return "Git kept the branch: uncommitted changes there would be overwritten. Commit or stash them first.";
+  if (/already (checked out|used by worktree) at/i.test(s)) return "That branch is checked out in a worktree. Pick the worktree instead.";
+  if (/invalid reference|did not match any/i.test(s)) return "Git has no such branch.";
+  const line = s.split(/\r?\n/).map((l) => l.trim()).find((l) => /^(error|fatal):/i.test(l)) ?? s.trim().split(/\r?\n/).pop() ?? "";
+  return line.replace(/^(error|fatal):\s*/i, "") || "git switch failed.";
+}
+
 // The dashboard
 
 /** Docker's "1.2MB / 340kB" as [in, out] bytes. */

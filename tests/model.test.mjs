@@ -509,3 +509,11 @@ test("the newest build or bring-up speaks for a Service, not an old failed one l
   assert.equal(m.opFor([op(1, "1"), op(5, null)], "s", "web").at, 5);
   assert.equal(m.opFor([op(5, null), op(1, "1")], "s", "web").at, 5);
 });
+
+test("a refused git switch is said in a sentence", () => {
+  assert.match(m.gitRefusal("error: Your local changes to the following files would be overwritten by checkout:\n\tf\nPlease commit your changes or stash them before you switch branches.\nAborting"), /^Git kept the branch: uncommitted changes/);
+  assert.match(m.gitRefusal("fatal: 'other' is already used by worktree at '/x/wt'"), /checked out in a worktree/);
+  assert.match(m.gitRefusal("fatal: 'other' is already checked out at '/x/wt'"), /checked out in a worktree/);
+  assert.equal(m.gitRefusal("fatal: invalid reference: nope"), "Git has no such branch.");
+  assert.equal(m.gitRefusal("fatal: something else\n"), "something else");
+});

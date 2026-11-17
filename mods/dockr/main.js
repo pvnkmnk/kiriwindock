@@ -312,7 +312,7 @@ export default class Dockr extends View {
     // With Docker stopped the script would only fail in a terminal nobody is looking at: say so here.
     const down = p.script && !p.error ? await docker.alive(p.stack.machine ?? null) : null;
     if (down) { this.note = `${p.title}: ${down}`; cx.notify(); return; }
-    if (p.undo !== undefined) this.undo = Object.keys(p.undo.targets).length ? { ...p.undo, label: Object.values(p.undo.targets).map(model.sourceName).join(", ") } : null;
+    if (p.undo !== undefined) this.undo = Object.keys(p.undo.targets).length ? { ...p.undo, label: p.undo.checkout?.branch ?? Object.values(p.undo.targets).map(model.sourceName).join(", ") } : null;
     if (p.error || !p.script) { this.note = p.error ?? p.note ?? ""; cx.notify(); return; }
     const r = await docker.terminal(p.stack.machine, p.stack.dir, { stack: p.stack.name, ...p.labels }, p.script);
     this.note = r.error ? `${p.title}: ${model.explain(r.error, p.stack.machine)}` : p.note ?? "";
@@ -320,12 +320,12 @@ export default class Dockr extends View {
     cx.notify();
   }
 
-  async doSwitch(cx, name, targets, start, title) {
+  async doSwitch(cx, name, targets, start, title, checkout = null) {
     const key = Object.keys(targets).length === 1 ? `${name}/${Object.keys(targets)[0]}` : name;
     if (this.busy[key]) return;
     this.busy[key] = "checking";
     cx.notify();
-    try { await this.runOp(cx, await this.store.prepareSwitch(name, targets, start, title)); }
+    try { await this.runOp(cx, await this.store.prepareSwitch(name, targets, start, title, checkout)); }
     finally { delete this.busy[key]; cx.notify(); }
   }
 
@@ -411,7 +411,7 @@ export default class Dockr extends View {
       } else if (req.kind === "rebuild") {
         const row = this.store.rows(req.stack).find((r) => r.name === req.service);
         if (row) await this.runOp(cx, await this.store.prepareRebuild(row));
-      } else await this.doSwitch(cx, req.stack, req.targets, req.start, req.title);
+      } else await this.doSwitch(cx, req.stack, req.targets, req.start, req.title, req.checkout ?? null);
     });
   }
 
@@ -807,7 +807,7 @@ export default class Dockr extends View {
           .when(!!undo, (x) => x.child(this.button(t, "undo", `Undo: back to ${undo.label}`, async (cx) => {
             const u = this.undo;
             this.undo = null;
-            await this.doSwitch(cx, u.stack, u.targets, false, `Back to ${u.label}`);
+            await this.doSwitch(cx, u.stack, u.targets, false, `Back to ${u.label}`, u.checkout ?? null);
           }, { tip: "Undo the last Switch" })))
           .child(div().id("note-close").flex_none().px(5).py(1).rounded(4).cursor_pointer().hover((x) => x.bg(t.raised)).tooltip("Dismiss").child("✕")
             .on_click((_e, cx) => { this.note = ""; this.undo = null; cx.notify(); }))))
@@ -871,12 +871,23 @@ export default class Dockr extends View {
     return this.picking.row.sources.filter((s) => words.every((w) => `${s.branch ?? ""} ${s.path}`.toLowerCase().includes(w)));
   }
 
+  /** The branches no checkout is on that match the filter. Picking one checks it out in the Main checkout. */
+  looseMatches() {
+    const words = this.text.toLowerCase().split(/\s+/).filter(Boolean);
+    return this.picking.row.sources.some((s) => s.main) ? this.loose.filter((b) => words.every((w) => b.toLowerCase().includes(w))).slice(0, 30) : [];
+  }
+
   /** Hands the ask to the panel and closes. */
   ask(kind) {
-    const p = this.picking, s = this.matches()[this.at];
-    if (kind === "switch" && !s) return;
+    const p = this.picking, list = this.matches(), s = list[this.at], branch = s ? null : this.looseMatches()[this.at - list.length];
+    if (kind === "switch" && !s && !branch) return;
     const req = { n: Date.now(), kind, stack: p.stack.name, service: p.row.name, start: this.start };
-    if (kind === "switch") {
+    if (kind === "switch" && branch) {
+      const main = p.row.sources.find((x) => x.main);
+      req.targets = { [p.row.name]: { ...main, branch } };
+      req.checkout = { main: main.path, branch };
+      req.title = `Check out ${branch} for ${p.row.name}`;
+    } else if (kind === "switch") {
       req.targets = { [p.row.name]: s };
       for (const o of p.others[s.path] ?? []) if (this.also[o.name] !== false) req.targets[o.name] = o.source;
       req.title = `Switch ${Object.keys(req.targets).join(", ")} to ${model.sourceName(s)}`;
@@ -901,25 +912,29 @@ export default class Dockr extends View {
         .child(div().flex_none().text_size(10.5).text_color(cost === "rebuild" ? t.ansi3 : t.dim).child(cost ? costText[cost] : "…")));
     });
     if (!list.length) rows.child(div().p(8).text_size(11.5).text_color(t.dim).child(p.row.sources.length ? "No checkout matches." : this.reading ? "Reading the worktrees…" : "No checkouts found for this Service."));
-    const words = this.text.toLowerCase().split(/\s+/).filter(Boolean);
-    const loose = this.loose.filter((b) => words.every((w) => b.toLowerCase().includes(w)));
+    const loose = this.looseMatches(), mainAt = p.row.sources.find((s) => s.main)?.path;
     if (loose.length) {
       rows.child(div().w_full().px(8).pt(8).pb(2).text_size(10.5).text_color(t.dim).child("BRANCHES WITH NO WORKTREE"));
-      for (const b of loose.slice(0, 30)) {
-        rows.child(h_flex().w_full().h(24).px(8).gap(8).items_center().tooltip(`Nothing is checked out on ${b}. Add a worktree for it, and it shows above.`)
-          .child(svg(icon("branch")).size(11).flex_none().text_color(t.dim))
-          .child(div().flex_1().min_w(0).truncate().text_color(t.dim).child(b))
-          .child(div().flex_none().text_size(10.5).text_color(t.dim).child("add a worktree to run it")));
-      }
+      loose.forEach((b, j) => {
+        const i = list.length + j, on = i === this.at;
+        rows.child(h_flex().id(`pick-loose-${j}`).w_full().h(24).px(8).gap(8).items_center().rounded(5).cursor_pointer()
+          .hover((x) => x.bg(t.hover)).when(on, (el) => el.bg(t.selected))
+          .tooltip(`Runs git switch ${b} in ${mainAt}. Every Service that runs from the Main checkout follows. Git keeps uncommitted work and refuses if it would be overwritten.`)
+          .on_click((_e, cx) => { this.at = i; this.also = {}; cx.notify(); })
+          .child(svg(icon("branch")).size(11).flex_none().text_color(on ? t.accent : t.dim))
+          .child(div().flex_1().min_w(0).truncate().text_color(on ? t.foreground : t.muted).child(b))
+          .child(div().flex_none().text_size(10.5).text_color(t.dim).child("check out in the Main checkout")));
+      });
     }
+    const count = list.length + loose.length, pickedBranch = picked ? null : loose[this.at - list.length] ?? null;
 
     const runs = p.row.runs ? p.row.sources.find((s) => model.norm(s.path) === model.norm(p.row.runs)) : null;
-    const idle = !picked || (p.row.set && model.norm(p.row.set) === model.norm(picked.path) && !p.row.drift && !others.some((o) => this.also[o.name] !== false));
+    const idle = (!picked && !pickedBranch) || (!!picked && p.row.set && model.norm(p.row.set) === model.norm(picked.path) && !p.row.drift && !others.some((o) => this.also[o.name] !== false));
     return v_flex().id("dockr-picker").track_focus(this.handle).w_full().p(10).gap(8).bg(t.popover).text_color(t.foreground).text_size(12.5)
       .on_key_down((e, cx) => {
         // A filter box takes the plain letters, so actions are ctrl chords, as in CodeyPacker's branch mod.
         const k = e.keystroke;
-        if (e.key === "down" || k === "ctrl-j" || k === "ctrl-n") this.at = Math.min(list.length - 1, this.at + 1);
+        if (e.key === "down" || k === "ctrl-j" || k === "ctrl-n") this.at = Math.min(count - 1, this.at + 1);
         else if (e.key === "up" || k === "ctrl-k" || k === "ctrl-p") this.at = Math.max(0, this.at - 1);
         else if (e.key === "enter") this.ask("switch");
         else if (k === "ctrl-r") this.ask("rebuild");
@@ -942,7 +957,7 @@ export default class Dockr extends View {
       .child(h_flex().w_full().flex_none().gap(6).items_center()
         .child(div().flex_1().min_w(0).child(this.check(t, "start", this.start, "Start if stopped", () => { this.start = !this.start; })))
         .child(this.button(t, "rebuild", "Rebuild", () => this.ask("rebuild"), { tip: "Rebuild the image from the Source it is set to" }))
-        .child(this.button(t, "switch", "Switch", () => this.ask("switch"), { primary: !idle, dim: idle, tip: p.row.running ? "Enter. The Service is recreated from this checkout." : "Enter. The Service stays stopped unless Start if stopped is ticked." })))
+        .child(this.button(t, "switch", pickedBranch ? "Check out" : "Switch", () => this.ask("switch"), { primary: !idle, dim: idle, tip: p.row.running ? "Enter. The Service is recreated from this checkout." : "Enter. The Service stays stopped unless Start if stopped is ticked." })))
       .child(legend(t, [["↑/↓", "move"], ["ctrl-j/k", "move"], ["enter", "switch"], ["ctrl-r", "rebuild"], ["ctrl-s", "start if stopped"], ["esc", "close"]]));
   }
 

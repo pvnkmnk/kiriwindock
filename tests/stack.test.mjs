@@ -239,6 +239,33 @@ test("a compose run by hand shows as Drift, and Apply brings the Service back", 
   assert.equal(who(), "feat");
 });
 
+test("a branch with no worktree is checked out in the Main checkout, and its undo goes back", opts, async () => {
+  const main = join(root, "web");
+  git(main, "switch", "-q", "-c", "solo");
+  writeFileSync(join(main, "src/who.txt"), "solo\n");
+  git(main, "commit", "-qam", "solo");
+  git(main, "switch", "-q", "main");
+  const target = { ...source("web", "main"), branch: "solo" };
+  const op = await store.prepareSwitch(NAME, { web: target }, false, "Check out solo for web", { main, branch: "solo" });
+  assert.equal(op.error, undefined);
+  assert.equal(run(op).status, 0);
+  assert.equal(git(main, "branch", "--show-current").trim(), "solo");
+  assert.equal(who(), "solo");
+  assert.deepEqual(op.undo.checkout, { main, branch: "main" });
+  assert.equal(op.undo.targets.web.branch, "feat");
+  // Git refuses when uncommitted work would be overwritten, and Dockr changes nothing.
+  writeFileSync(join(main, "src/who.txt"), "dirty\n");
+  const refused = await store.prepareSwitch(NAME, { web: target }, false, "Check out main for web", { main, branch: "main" });
+  assert.match(refused.error, /Git kept the branch/);
+  assert.equal(git(main, "branch", "--show-current").trim(), "solo");
+  git(main, "checkout", "--", "src/who.txt");
+  const back = await store.prepareSwitch(NAME, op.undo.targets, false, "Back to feat", op.undo.checkout);
+  assert.equal(run(back).status, 0);
+  assert.equal(git(main, "branch", "--show-current").trim(), "main");
+  await look();
+  assert.equal(who(), "feat");
+});
+
 test("Stop, Start and Restart run to their end, and a stopped Service is only set unless started", opts, async () => {
   assert.equal(await store.quick(row("web"), ["stop"]), null);
   assert.equal(row("web").container.state, "exited");
@@ -293,7 +320,8 @@ test("the wait returns when a container changes, and continues from just after i
 
 test("a failing action exits with its code and labels its terminal", opts, async () => {
   const op = store.op(store.stack(NAME), "Fail", "switch", ["web"], [], ["sh -c 'exit 7'"]);
-  assert.match(op.script, /hc label "\$HC_TERMINAL_ID" dockr\.failed="\$code"/);
+  // hc is looked for in its usual places: a background terminal's PATH may lack it.
+  assert.match(op.script, /for h in hc "\$HOME\/\.local\/bin\/hc" hc\.exe; do "\$h" label "\$HC_TERMINAL_ID" dockr\.failed="\$code"/);
   assert.equal(run(op).status, 7);
 });
 

@@ -12,7 +12,7 @@ A dialog that lists Docker containers and sets which checkout each compose servi
 - **Container window.** Logs with search (plain or `/regex/`), follow and timestamps. Inspect. CPU, memory, network and disk Stats.
 - **Group actions.** Start all, stop all, every container's logs in one stream, and Remove containers, which asks first.
 - **Links.** A container's configured links or published ports open in the browser.
-- **Checkout picker.** Move a service to one of its worktrees. Each choice says whether it costs a recreate or a rebuild, and Undo goes back. It offers to move the other services that have a worktree on the same branch.
+- **Checkout picker.** Move a service to one of its worktrees, or check a branch with no worktree out in the main checkout. Each choice says whether it costs a recreate or a rebuild, and Undo goes back. It offers to move the other services that have a worktree on the same branch.
 - **Failures explained.** The row says why a container failed, with its last three log lines. Three exits in a minute show as a restart loop.
 - **Diagnose.** Sends an agent Docker's report and the last 100 log lines, after showing you the exact text.
 - **Drift and stale images.** Flags a service running a different checkout than the one set, and an image older than its dependency files.
@@ -23,7 +23,7 @@ A dialog that lists Docker containers and sets which checkout each compose servi
 
 - Docker with compose, git, `sh` and `bash`. On Windows, point it at a WSL Machine.
 - `ctrl-shift-d`. For toasts, one small block in your own layout.
-- It runs docker and git, opens links in your browser, reads `~/.config/herdr-app/dockr.json` and writes `.dockr.env` beside the compose file. It never opens `.env` or reads the value of an environment variable.
+- It runs docker and git, opens links in your browser, reads `~/.config/herdr-app/dockr.json` and writes `.dockr.env` beside the compose file. It runs `git switch` in a main checkout only when you pick a branch there. It never opens `.env` or reads the value of an environment variable.
 
 ## Install
 

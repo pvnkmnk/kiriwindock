@@ -107,6 +107,7 @@ The keys follow CodeyPacker's mods (`run`, `jump`, `branch`), so they are the sa
 
 **Choosing a checkout** (projects in `dockr.json`)
 - Click the branch on a container's second line. Type to filter, arrow keys to move, Enter to switch. Each checkout says what it costs: `recreate` takes seconds, `rebuild` builds the image first.
+- **Branches with no worktree** are listed under the checkouts. Picking one runs `git switch <branch>` in the Main checkout and runs the service from there, so worktrees are optional. Every service that runs from that Main checkout follows. Git keeps uncommitted work and refuses when it would be overwritten, and Dockr then changes nothing. A branch that is checked out in a worktree is picked as that worktree. Undo puts the Main checkout back on the branch it had.
 - When other services have a worktree on the picked branch, the picker offers "also move <service>", ticked by default. Unticked, `Start if stopped` leaves a stopped service stopped.
 - A Switch or build shows its step on the row: checking, building, recreating, waiting for healthy. A failed one becomes a red chip that opens the output.
 - `Undo: back to <branch>` appears after a Switch.

@@ -1,6 +1,6 @@
 // Everything Dockr asks of Docker, git and herdr-core. Each call runs on the Stack's Machine.
 import { exec, hc, readTextFile, window as win } from "herdr";
-import { clean, composeArgs, desktopBinds, explain, parseContainers, parseWorktrees, q } from "./model.js";
+import { clean, composeArgs, desktopBinds, explain, gitRefusal, parseContainers, parseWorktrees, q } from "./model.js";
 
 const on = (machine) => (machine ? { on: machine } : {});
 const failed = (e) => ({ code: 1, stdout: "", stderr: String(e?.message ?? e) });
@@ -193,6 +193,15 @@ export async function worktrees(machine, main) {
 export async function branches(machine, main) {
   const r = await exec("git", ["-C", main, "branch", "--sort=-committerdate", "--format=%(refname:short)"], on(machine)).catch(failed);
   return r.code === 0 ? r.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean) : [];
+}
+
+/**
+ * Checks `branch` out in the Main checkout with a plain `git switch`: git keeps uncommitted work
+ * and refuses when it would be overwritten. Null, or why git refused.
+ */
+export async function checkout(machine, main, branch) {
+  const r = await exec("git", ["-C", main, "switch", branch], on(machine)).catch(failed);
+  return r.code === 0 ? null : gitRefusal(r.stderr || r.stdout);
 }
 
 /** Which of the Stack's env files exist. Neither is opened. */

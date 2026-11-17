@@ -761,10 +761,10 @@ export function keyAction(k, item, facts = {}) {
 
 /**
  * The legend under the list: every key that acts on the selected item, and how to see the rest.
- * For a container that leaves out its group's keys, search and leave, which "?" lists.
+ * For a container that leaves out browser, copy name, its group's keys, search and leave, which "?" lists.
  */
 export function coreHints(item, facts = {}) {
-  const rest = new Set(item?.kind === "row" ? ["u", "X", "D", "/", "q"] : ["/", "q"]);
+  const rest = new Set(item?.kind === "row" ? ["o", "y", "u", "X", "D", "/", "q"] : ["/", "q"]);
   return [...keyHints(item, facts).filter(([k]) => !rest.has(k)), ["?", "all keys"]];
 }
 

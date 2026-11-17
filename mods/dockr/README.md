@@ -80,7 +80,7 @@ The dialog is a list of containers, grouped the way Docker Desktop groups them: 
 
 **Keys**
 
-The keys follow CodeyPacker's mods (`run`, `jump`, `branch`), so they are the same letters you use there. `ctrl-shift-d` opens the dialog, which has the keyboard while it is open, and closes it again. Letter badges and a legend show at all times. The legend lists every key that acts on the selected container: logs, start or stop, restart, terminal, checkout, rebuild, build output, diagnose, browser, copy name and menu. `?` adds the group keys, search and the rest.
+The keys follow CodeyPacker's mods (`run`, `jump`, `branch`), so they are the same letters you use there. `ctrl-shift-d` opens the dialog, which has the keyboard while it is open, and closes it again. Letter badges and a legend show at all times. The legend lists every key that acts on the selected container: logs, diagnose, terminal, restart, stop or start, build output, checkout, rebuild and menu, in the order of the row's buttons. `?` adds browser, copy name, the group keys, search and the rest.
 
 | Key | Action |
 |---|---|

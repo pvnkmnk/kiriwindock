@@ -70,7 +70,7 @@ The dialog is a list of containers, grouped the way Docker Desktop groups them: 
 - The second line shows the checkout it runs from, or its image, then its links. A container with no configured link shows its published ports. Click one to open it in the browser.
 - **While it is built or brought up** a third line shows the newest step from that work's terminal, such as `[web 4/6] RUN npm ci`. It is read when the terminal prints, about once a second at most.
 - **While it boots** a third line shows `booting` and the container's newest log line, which is the step it is on. A container boots until its health check passes, or for its first minute when it has no health check. The line is followed only while the dialog is open.
-- **Hover** for Logs, Terminal, Restart, Stop or Start, and `⋯`. **Right-click** for the same menu, which also has Rebuild image, Change checkout, Diagnose and Copy name, ID or image.
+- **Hover**, or select a row with the keys, for Logs, Diagnose, Terminal, Restart, Stop or Start, and `⋯`. **Right-click** for the same menu, which also has Rebuild image, Change checkout, Diagnose and Copy name, ID or image.
 - **Click** the row to open the container: Logs, Inspect and Stats tabs, with Terminal, Restart and Stop in the title bar.
 
 **The container window**

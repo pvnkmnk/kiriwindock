@@ -669,7 +669,8 @@ export default class Dockr extends View {
     const op = managed ? model.opFor(ops, r.stack, r.name) : null;
     const ph = model.phase(r.name, op, c);
     const busy = this.busy[r.key] ?? (ph && !ph.failed ? ph.text : null);
-    const hovered = this.hover === r.key && !busy;
+    // The row's buttons show under the pointer, and on the row the keys have selected.
+    const hovered = (this.hover === r.key || (this.kb && !this.typing && this.sel === r.key)) && !busy;
     const hint = model.suggestion(r, branch);
     const shownSource = r.service ? (c ? r.actual : r.set) : null;
     const gone = !!r.set?.missing;

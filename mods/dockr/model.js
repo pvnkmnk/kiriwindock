@@ -759,10 +759,13 @@ export function keyAction(k, item, facts = {}) {
   return null;
 }
 
-/** The few keys the legend always shows: move, open, the start or stop that applies, restart, and how to see the rest. */
+/**
+ * The legend under the list: every key that acts on the selected item, and how to see the rest.
+ * For a container that leaves out its group's keys, search and leave, which "?" lists.
+ */
 export function coreHints(item, facts = {}) {
-  const core = new Set(["j/k", "enter", "s", "x", "r", "p"]);
-  return [...keyHints(item, facts).filter(([k]) => core.has(k)), ["?", "all keys"]];
+  const rest = new Set(item?.kind === "row" ? ["u", "X", "D", "/", "q"] : ["/", "q"]);
+  return [...keyHints(item, facts).filter(([k]) => !rest.has(k)), ["?", "all keys"]];
 }
 
 /** Every key hint for the selected item: [key, what] pairs, only the ones that do something now. */
@@ -770,7 +773,7 @@ export function keyHints(item, facts = {}) {
   const all = [["j/k", "move"]];
   const add = (k, label, what) => { if (keyAction(k, item, facts)) all.push([label ?? k, what]); };
   if (item?.kind === "group") { add("enter", "enter", "fold"); }
-  add("enter", "enter", item?.kind === "row" ? "open" : null);
+  add("enter", "enter", item?.kind === "row" ? "logs" : null);
   add("s", null, "start"); add("x", null, "stop"); add("r", null, "restart"); add("t", null, "terminal");
   add("c", null, "checkout"); add("b", null, "rebuild"); add("p", null, "build output"); add("d", null, "diagnose"); add("o", null, "browser"); add("y", null, "copy name");
   add("u", null, "start all"); add("shift-x", "X", "stop all"); add("shift-d", "D", "remove");

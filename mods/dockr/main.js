@@ -321,7 +321,7 @@ export default class Dockr extends View {
       else pick(a.action === "first" ? 0 : items.length - 1);
     } else if (a.on === "group") {
       const g = item.group;
-      if (a.action === "menu") this.openMenu(g.key, this.groupItems(g));
+      if (a.action === "menu") this.openMenu(g.key, this.groupItems(g), true);
       else if (a.action === "fold" || a.action === "unfold" || a.action === "toggle") {
         const want = a.action === "fold" ? true : a.action === "unfold" ? false : !this.folded[g.key];
         if (!!this.folded[g.key] !== want) this.fold(cx, g.key);
@@ -329,7 +329,7 @@ export default class Dockr extends View {
       } else cx.spawn(async (cx) => { await this.doAction(cx, g.key, a.action); cx.notify(); });
     } else {
       const r = item.row;
-      if (a.action === "menu") this.openMenu(r.key, this.menuItems(r));
+      if (a.action === "menu") this.openMenu(r.key, this.menuItems(r), true);
       else if (a.action === "copy") { cx.write_to_clipboard(r.container.name); this.note = `Copied ${r.container.name}`; }
       else cx.spawn(async (cx) => { await this.doAction(cx, r.key, a.action, a.action === "browser" ? this.links[r.key] : null); cx.notify(); });
     }
@@ -631,8 +631,19 @@ export default class Dockr extends View {
     return items;
   }
 
-  openMenu(key, items) {
-    openOverlay({ mod: "dockr", kind: "popup", width: 270, height: menu.height(items), props: { menu: { key, items } } });
+  /**
+   * Opens a menu. `byKey`: a key asked for it, so it goes to the dialog's top right corner.
+   * Else it goes to the pointer, read here: over a dialog Herdr's own idea of the pointer is the
+   * spot where it last was over the layout.
+   */
+  openMenu(key, items, byKey = false) {
+    const width = 270, height = menu.height(items);
+    let at;
+    try {
+      if (!byKey) at = window.mouse_position();
+      else if (this.modal) { const v = window.viewport_size(); at = { x: (v.width + 760) / 2 - width - 12, y: v.height * 0.1 + 84 }; }
+    } catch {}
+    openOverlay({ mod: "dockr", kind: "popup", width, height, ...(at ? { at: { x: Math.round(at.x), y: Math.round(at.y) } } : {}), props: { menu: { key, items } } });
   }
 
   /** The panel's groups: each configured Stack, each other compose project, then the containers in none. */

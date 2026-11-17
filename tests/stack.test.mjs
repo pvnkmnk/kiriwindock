@@ -353,6 +353,19 @@ test("a container outside every Stack starts, stops and restarts by name, and a 
   assert.ok(store.rows(NAME).every((r) => r.container.state === "running"));
 });
 
+test("a booting container's newest log line is read for its row", opts, async () => {
+  const name = `${NAME}-boot`;
+  sh(root, "docker", "run", "-d", "--name", name, "busybox:1.36", "sh", "-c", "echo step one; echo 'Now listening on 80'; echo; sleep 30");
+  try {
+    await look();
+    const c = store.containers().find((x) => x.name === name);
+    assert.equal(model.booting(c), true);
+    const r = await docker.waitLogs(null, name, "", 5);
+    assert.equal(r.error, undefined);
+    assert.equal(model.bootLine(model.parseLogs(r.text).lines), "Now listening on 80");
+  } finally { sh(root, "docker", "rm", "-f", name); }
+});
+
 test("Clean up removes the images a rebuild left behind and keeps the volume", opts, async () => {
   const volume = `${NAME}_keep`;
   sh(root, "docker", "volume", "create", "--label", `com.docker.compose.project=${NAME}`, volume);

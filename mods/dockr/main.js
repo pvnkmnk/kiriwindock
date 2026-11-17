@@ -81,6 +81,8 @@ export default class Dockr extends View {
     this.told = new Set();     // failed builds already announced
     this.stats = {};           // container name -> its last CPU and memory samples, while the panel shows
     this.sampling = new Set(); // machines with a stats wait running
+    this.boot = {};            // container name -> its newest log line, while it boots
+    this.following = new Set(); // container names with a boot line wait running
     this.statsOff = new Set(); // machines whose stats wait could not run
     this.folded = load("folded2", {});
     this.startStopped = localStorage.getItem("start") === "1";
@@ -168,6 +170,30 @@ export default class Dockr extends View {
           cx.notify();
         }
       } finally { this.sampling.delete(machine); this.noteHidden(); }
+    });
+  }
+
+  /**
+   * Follows a booting container's log for its newest line, which the row shows as what it is
+   * doing. It ends when the container is no longer booting, stops, or the list is not shown.
+   */
+  followBoot(cx, machine, name) {
+    if (this.following.has(name)) return;
+    this.following.add(name);
+    const still = () => this.visible() && model.booting((this.store.byMachine[machine] ?? []).find((c) => c.name === name));
+    cx.spawn(async (cx) => {
+      try {
+        let since = "";
+        while (still()) {
+          const r = await docker.waitLogs(machine || null, name, since, 5);
+          if (r.error) return;
+          const got = model.parseLogs(r.text);
+          for (const l of got.lines) if (l.at > since) since = l.at;
+          const line = model.bootLine(got.lines);
+          if (line) { this.boot[name] = line; cx.notify(); }
+          if (got.ended) return;
+        }
+      } finally { this.following.delete(name); delete this.boot[name]; cx.notify(); }
     });
   }
 
@@ -665,6 +691,13 @@ export default class Dockr extends View {
         .child(right))
       .child(second);
     if (cause) out.child(this.renderFailure(t, r, cause));
+    else if (model.booting(c)) {
+      // What it is doing while it boots: its newest log line, else what its health check last said.
+      const line = this.boot[c.name] || (c.healthOutput ?? "").split(/\r?\n/).filter(Boolean).pop() || "";
+      if (line) out.child(h_flex().w_full().pl(this.kb ? 78 : 49).pr(10).pb(5).gap(6).items_center()
+        .child(div().flex_none().text_size(10.5).text_color(t.working).child("booting"))
+        .child(div().flex_1().min_w(0).truncate().tooltip(line).font_family(settings().font_family ?? "JetBrains Mono").text_size(10.5).text_color(t.muted).child(line)));
+    }
     if (gone) out.child(this.notice(t, `gone-${id}`, "The worktree this service is set to no longer exists.", t.ansi1, [["Pick another", (cx) => this.openPicker(cx, r), true]]));
     else if (r.drift && !busy) {
       const a = model.sourceName(r.actual), b = model.sourceName(r.set);
@@ -746,6 +779,7 @@ export default class Dockr extends View {
     if (shown && !this.wasShown) cx.spawn(async (cx) => { await this.reload(cx); });
     this.wasShown = shown;
     if (shown) for (const m of Object.keys(this.store.byMachine)) this.sample(cx, m);
+    if (shown) for (const [m, list] of Object.entries(this.store.byMachine)) for (const c of list) if (model.booting(c)) this.followBoot(cx, m, c.name);
     this.takeRequest(cx);
 
     this.kb = this.modal || this.handle.is_focused() || this.typing;

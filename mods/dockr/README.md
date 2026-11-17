@@ -68,6 +68,7 @@ The dialog is a list of containers, grouped the way Docker Desktop groups them: 
 **A container**
 - A green dot is running, a turning ring is starting or being worked on, red is unhealthy or exited with an error, a hollow ring is stopped.
 - The second line shows the checkout it runs from, or its image, then its links. A container with no configured link shows its published ports. Click one to open it in the browser.
+- **While it boots** a third line shows `booting` and the container's newest log line, which is the step it is on. A container boots until its health check passes, or for its first minute when it has no health check. The line is followed only while the dialog is open.
 - **Hover** for Logs, Terminal, Restart, Stop or Start, and `⋯`. **Right-click** for the same menu, which also has Rebuild image, Change checkout, Diagnose and Copy name, ID or image.
 - **Click** the row to open the container: Logs, Inspect and Stats tabs, with Terminal, Restart and Stop in the title bar.
 

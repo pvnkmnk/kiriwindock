@@ -852,3 +852,26 @@ export function dashboard(groups, stats, statusOf_ = statusOf, sort = "cpu", now
   rows.sort((a, b) => (sort === "mem" ? b.mem - a.mem : b.cpu - a.cpu) || a.name.localeCompare(b.name));
   return { totals, groups: perGroup, rows, attention, history };
 }
+
+// The line a booting container shows
+
+/**
+ * Whether a container is still booting: Docker says its health is "starting", or it has no
+ * health check and started less than `window` ms ago.
+ */
+export function booting(c, now = Date.now(), window = 60000) {
+  if (!c || c.state !== "running") return false;
+  if (c.health === "starting") return true;
+  if (c.health) return false;
+  const at = Date.parse(c.startedAt);
+  return !Number.isNaN(at) && now - at >= 0 && now - at < window;
+}
+
+/** The newest line worth showing from log lines ({ text }), or "": the last one that says something. */
+export function bootLine(lines) {
+  for (let i = (lines ?? []).length - 1; i >= 0; i--) {
+    const text = String(lines[i]?.text ?? "").replace(/\s+/g, " ").trim();
+    if (/[A-Za-z0-9]/.test(text)) return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+  }
+  return "";
+}

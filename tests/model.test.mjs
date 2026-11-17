@@ -527,3 +527,19 @@ test("the brief for a container that has not failed asks for a look, not a fix",
   assert.match(text, /- Problem: none that Docker reports/);
   assert.doesNotMatch(text, /is failing/);
 });
+
+test("a container boots until it is healthy, or for a minute when it has no health check", () => {
+  const now = 1_000_000_000, at = (ms) => new Date(now - ms).toISOString();
+  assert.equal(m.booting({ state: "running", health: "starting", startedAt: at(600_000) }, now), true);
+  assert.equal(m.booting({ state: "running", health: "healthy", startedAt: at(1_000) }, now), false);
+  assert.equal(m.booting({ state: "running", health: "", startedAt: at(20_000) }, now), true);
+  assert.equal(m.booting({ state: "running", health: "", startedAt: at(61_000) }, now), false);
+  assert.equal(m.booting({ state: "exited", health: "", startedAt: at(1_000) }, now), false);
+  assert.equal(m.booting(null, now), false);
+});
+
+test("the boot line is the newest log line that says something", () => {
+  assert.equal(m.bootLine([{ text: "Starting up" }, { text: "  Now   listening on: http://[::]:80 " }, { text: "   " }, { text: "---" }]), "Now listening on: http://[::]:80");
+  assert.equal(m.bootLine([{ text: "x".repeat(300) }]).length, 201);
+  assert.equal(m.bootLine([]), "");
+});

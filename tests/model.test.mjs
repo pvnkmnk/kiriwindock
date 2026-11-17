@@ -473,9 +473,9 @@ test("panelItems, keyAction and keyHints follow the run mod's keys", () => {
   assert.ok(m.keyHints(row, up).some(([k, w]) => k === "x" && w === "stop"));
   assert.ok(!m.keyHints(row, up).some(([k]) => k === "s"));
   assert.ok(m.keyHints(head).some(([k, w]) => k === "enter" && w === "fold"));
-  assert.deepEqual(m.coreHints(row, up).map(([k]) => k), ["j/k", "enter", "x", "r", "t", "c", "b", "d", "o", "y", "m", "?"]);
+  assert.deepEqual(m.coreHints(row, up).map(([k]) => k), ["j/k", "enter", "d", "t", "r", "x", "o", "c", "b", "y", "m", "?"]);
   assert.ok(m.coreHints(row, up).some(([k, w]) => k === "enter" && w === "logs"));
-  assert.deepEqual(m.coreHints(row, down).map(([k]) => k).slice(0, 3), ["j/k", "enter", "s"]);
+  assert.deepEqual(m.coreHints(row, down).map(([k]) => k).slice(0, 4), ["j/k", "enter", "d", "s"]);
   assert.ok(!m.coreHints(row, down).some(([k]) => k === "t" || k === "u"));
   assert.ok(m.coreHints(head, up).some(([k]) => k === "u"));
   assert.equal(act("?", row, up), "panel:help");

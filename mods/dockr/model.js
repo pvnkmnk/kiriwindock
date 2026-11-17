@@ -774,8 +774,9 @@ export function keyHints(item, facts = {}) {
   const add = (k, label, what) => { if (keyAction(k, item, facts)) all.push([label ?? k, what]); };
   if (item?.kind === "group") { add("enter", "enter", "fold"); }
   add("enter", "enter", item?.kind === "row" ? "logs" : null);
-  add("s", null, "start"); add("x", null, "stop"); add("r", null, "restart"); add("t", null, "terminal");
-  add("c", null, "checkout"); add("b", null, "rebuild"); add("p", null, "build output"); add("d", null, "diagnose"); add("o", null, "browser"); add("y", null, "copy name");
+  // The row's buttons, left to right, then what only its menu has, in the menu's order.
+  add("d", null, "diagnose"); add("t", null, "terminal"); add("r", null, "restart"); add("x", null, "stop"); add("s", null, "start");
+  add("p", null, "build output"); add("o", null, "browser"); add("c", null, "checkout"); add("b", null, "rebuild"); add("y", null, "copy name");
   add("u", null, "start all"); add("shift-x", "X", "stop all"); add("shift-d", "D", "remove");
   add("m", null, "menu");
   all.push(["/", "search"], ["q", "leave"]);

@@ -242,10 +242,11 @@ export async function compose(machine, stack, has, args) {
 
 /**
  * A terminal script that runs `lines` in order. On failure it labels its own terminal `dockr.failed`
- * (so the panel can say so) and waits for Enter, so the output stays to be read.
+ * (so the panel can say so) and waits for Enter, so the output stays to be read. A background
+ * terminal's PATH may lack hc (on WSL it does), so it is looked for in its usual places.
  */
 export function opScript(lines) {
-  return `${lines.join(" && ")}; code=$?; if [ "$code" -ne 0 ]; then hc label "$HC_TERMINAL_ID" dockr.failed="$code" >/dev/null 2>&1; printf '\\nFailed with exit code %s. Press Enter to close.\\n' "$code"; read _; fi; exit "$code"`;
+  return `${lines.join(" && ")}; code=$?; if [ "$code" -ne 0 ]; then for h in hc "$HOME/.local/bin/hc" hc.exe; do "$h" label "$HC_TERMINAL_ID" dockr.failed="$code" >/dev/null 2>&1 && break; done; printf '\\nFailed with exit code %s. Press Enter to close.\\n' "$code"; read _; fi; exit "$code"`;
 }
 
 /** The words of a compose command for a terminal's script. */

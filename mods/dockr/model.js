@@ -435,7 +435,8 @@ export function parseOps(terms) {
 
 /** The build or bring-up that is working on a Service, or null. Without a service: any in the Stack. */
 export const opFor = (ops, stack, service) =>
-  ops.find((o) => o.kind === "op" && o.stack === stack && (service == null || o.services.includes(service))) ?? null;
+  ops.filter((o) => o.kind === "op" && o.stack === stack && (service == null || o.services.includes(service)))
+    .sort((a, b) => b.at - a.at)[0] ?? null; // the newest: an old failed one left open must not hide it
 
 /** Where a Service is in a running build or bring-up: { text, failed? }, or null with none. */
 export function phase(name, op, container) {

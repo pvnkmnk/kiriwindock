@@ -503,3 +503,9 @@ test("a stopped Docker Desktop is named as such, whatever it printed", () => {
     assert.equal(m.explain(text, "wsl"), "Docker is not running. Start it, then press Refresh.");
   }
 });
+
+test("the newest build or bring-up speaks for a Service, not an old failed one left open", () => {
+  const op = (at, failed) => ({ kind: "op", stack: "s", services: ["web"], at, failed });
+  assert.equal(m.opFor([op(1, "1"), op(5, null)], "s", "web").at, 5);
+  assert.equal(m.opFor([op(5, null), op(1, "1")], "s", "web").at, 5);
+});

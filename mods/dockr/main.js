@@ -22,6 +22,7 @@ import { assignLetters, letterBadge, navigateByLetter } from "./kit/letters.js";
 
 const icon = (name) => `mods/dockr/icons/${name}.svg`;
 const OPEN = "dockr.open"; // true while the dialog is open: the status bar's copy then posts no toasts
+const BACK = "dockr.back"; // set when a popup or dialog opened from the list closes: the list then takes the keyboard again
 const WAKE = "dockr.wake"; // set when the dialog reads Docker again: the status bar's copy then does too, which restarts a watch that ended
 const REQUEST = "dockr.request"; // the picker's ask, handed to the panel through shared state
 const load = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback; } catch { return fallback; } };
@@ -89,6 +90,7 @@ export default class Dockr extends View {
     this.startStopped = localStorage.getItem("start") === "1";
     this.seenRequest = shared(REQUEST)?.n ?? 0;
     this.wasShown = this.visible();
+    this.seenBack = shared(BACK) ?? 0;
 
     cx.spawn(async (cx) => { await this.reload(cx); });
     cx.spawn(async (cx) => {
@@ -227,7 +229,10 @@ export default class Dockr extends View {
   visible() { return !this.chip && (this.modal || model.modShown(layout(), "dockr")); }
 
   /** The dialog has closed: the status bar's copy posts the toasts again. */
-  async close() { if (this.modal) setShared(OPEN, false); }
+  async close() {
+    if (this.modal) setShared(OPEN, false);
+    else if (!this.chip && props()?.overlay != null) setShared(BACK, Date.now());
+  }
 
   /** The status bar's mark: how many containers run, red when one has failed. A click opens the dialog. */
   renderChip(t, cx) {
@@ -450,6 +455,9 @@ export default class Dockr extends View {
       localStorage.setItem("start", this.startStopped ? "1" : "0");
     }
     cx.spawn(async (cx) => {
+      // This starts while the list is being drawn, and Herdr refuses a redraw asked for then: the
+      // actions ask for one at once, so step out of the draw first.
+      await null;
       if (req.kind === "act") await this.doAction(cx, req.key, req.action, req.arg);
       else if (req.kind === "tail") {
         const row = this.store.rows(req.stack).find((r) => r.name === req.service);
@@ -807,6 +815,11 @@ export default class Dockr extends View {
     if (shown) for (const [m, list] of Object.entries(this.store.byMachine)) for (const c of list) if (model.booting(c)) this.followBoot(cx, m, c.name);
     if (shown) for (const o of this.ops()) if (o.kind === "op" && o.failed == null) this.followOp(cx, o.address);
     this.takeRequest(cx);
+    // A popup or dialog over the list has closed. Herdr does not hand the keyboard back to a dialog.
+    if (this.modal && (shared(BACK) ?? 0) !== this.seenBack) {
+      this.seenBack = shared(BACK) ?? 0;
+      cx.spawn(async (cx) => { await null; if (!this.typing) this.handle.focus(); cx.notify(); });
+    }
 
     this.kb = this.modal || this.handle.is_focused() || this.typing;
     const ops = this.ops(), branch = this.branch();

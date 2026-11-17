@@ -89,7 +89,7 @@ The keys follow CodeyPacker's mods (`run`, `jump`, `branch`), so they are the sa
 | `t` | terminal |
 | `c` | change checkout |
 | `b` | rebuild image |
-| `d` | diagnose a failed container |
+| `d` | investigate the container with an agent (Diagnose when it has failed) |
 | `o` | open its first link or port in the browser |
 | `y` | copy the container name |
 | `u` / `X` | start all / stop all in the group |

@@ -451,6 +451,8 @@ test("panelItems, keyAction and keyHints follow the run mod's keys", () => {
   assert.equal(act("c", row, up), "row:source");
   assert.equal(act("c", row, down), null);
   assert.equal(act("d", row, down), "row:diagnose");
+  assert.equal(act("d", row, up), "row:diagnose"); // a running container can be looked into too
+  assert.equal(act("d", row, { ...up, created: false }), null);
   assert.equal(act("o", row, up), "row:browser");
   assert.equal(act("enter", row, up), "row:open");
   assert.equal(act("u", row, up), "group:up");
@@ -516,4 +518,12 @@ test("a refused git switch is said in a sentence", () => {
   assert.match(m.gitRefusal("fatal: 'other' is already checked out at '/x/wt'"), /checked out in a worktree/);
   assert.equal(m.gitRefusal("fatal: invalid reference: nope"), "Git has no such branch.");
   assert.equal(m.gitRefusal("fatal: something else\n"), "something else");
+});
+
+test("the brief for a container that has not failed asks for a look, not a fix", () => {
+  const c = { name: "p-web-1", image: "web", state: "running", health: "healthy", exitCode: 0, restarts: 0, oom: false, error: "", healthOutput: "", ports: [], command: "" };
+  const text = m.brief({ stack: { name: "p", compose: "/s/c.yml" }, row: { name: "web" }, container: c, lines: ["ready"] });
+  assert.match(text, /^Look into the Docker container for "web" in the compose project "p"\. Docker reports no failure\./);
+  assert.match(text, /- Problem: none that Docker reports/);
+  assert.doesNotMatch(text, /is failing/);
 });

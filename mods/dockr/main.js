@@ -351,7 +351,7 @@ export default class Dockr extends View {
     await this.runOp(cx, await this.store.prepareTail(row, kind), true);
   }
 
-  /** Opens the Diagnose dialog for a container that is not well, with the text an agent would get. */
+  /** Opens the Diagnose dialog for a container, failing or not, with the text an agent would get. */
   async openDiagnose(cx, r) {
     const c = r.container;
     if (!c) return;
@@ -363,7 +363,7 @@ export default class Dockr extends View {
       mod: "dockr", kind: "dialog", width: 720, height: 560,
       props: { diagnose: {
         service: r.name, machine, folder: src?.path ?? stack?.dir ?? null, branch: src?.branch ?? null,
-        why: model.why(c) || this.store.status(c).text,
+        why: model.why(c) || this.store.status(c).text || c.state,
         brief: model.brief({ stack, row: r, container: c, lines, loop: this.store.looping(c) }),
       } },
     });
@@ -550,7 +550,7 @@ export default class Dockr extends View {
     if (running) items.push({ label: "Stop", action: "stop" }, { label: "Restart", action: "restart" });
     else items.push({ label: c ? "Start" : "Create and start", action: "start" });
     if (r.service) items.push({ sep: true }, { label: "Change checkout…", action: "source", hint: "branch or worktree" }, { label: "Rebuild image", action: "rebuild" });
-    if (c && (model.why(c) || this.store.looping(c))) items.push({ sep: true }, { label: "Diagnose with an agent…", action: "diagnose" });
+    if (c) items.push({ sep: true }, { label: model.why(c) || this.store.looping(c) ? "Diagnose with an agent…" : "Investigate with an agent…", action: "diagnose" });
     if (c) items.push({ sep: true }, { label: "Copy name", copy: c.name }, { label: "Copy ID", copy: c.id.slice(0, 12) }, { label: "Copy image", copy: c.image });
     return items;
   }
@@ -611,6 +611,7 @@ export default class Dockr extends View {
         .when(!!op, (el) => el.child(this.iconButton(t, `out-${id}`, "output", "Show the output", () => this.peek(op.address, op.title, true))));
     } else if (hovered) {
       if (c) right.child(this.iconButton(t, `logs-${id}`, "logs", "Logs", act("open")));
+      if (c) right.child(this.iconButton(t, `diagnose-${id}`, "diagnose", "Investigate with an agent: shows what it will be told first", act("diagnose")));
       if (running) right.child(this.iconButton(t, `shell-${id}`, "shell", "Open terminal", act("terminal")));
       if (running) right.child(this.iconButton(t, `restart-${id}`, "restart", "Restart", act("restart")));
       if (running) right.child(this.iconButton(t, `stop-${id}`, "stop", "Stop", act("stop")));

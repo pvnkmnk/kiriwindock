@@ -174,6 +174,7 @@ export function render(self, t) {
       else if (info && k === "s" && !up) act(self, "start");
       else if (info && k === "x" && up) act(self, "stop");
       else if (info && k === "r" && up) act(self, "restart");
+      else if (info && k === "d") act(self, "diagnose");
       else if (info && k === "shift-t" && up) act(self, "terminal");
       else if (!logsTab) return;
       else if (k === "j" || e.key === "down") line(1);
@@ -216,6 +217,7 @@ export function render(self, t) {
       .when(logsTab && !!p.terminal, (el) => el.child(self.iconButton(t, "log-term", "output", "Open the raw tail in a terminal, with all of its history", () => { setShared("dockr.request", { n: Date.now(), kind: "tail", ...p.terminal }); close(); })))
       .when(!!info, (el) => el
         .child(div().w(1).h(18).flex_none().bg(t.border))
+        .child(self.iconButton(t, "win-diagnose", "diagnose", "Investigate with an agent: shows what it will be told first (d)", () => act(self, "diagnose")))
         .when(up, (x) => x
           .child(self.iconButton(t, "win-term", "shell", "Open a terminal in the container", () => act(self, "terminal")))
           .child(self.iconButton(t, "win-restart", "restart", "Restart", () => act(self, "restart")))
@@ -247,6 +249,6 @@ export function render(self, t) {
       .when(!rows.length, (el) => el.child(div().p(12).text_color(t.dim).child(L.lines.length ? "Every service is hidden." : L.seen ? "This container has written nothing." : "Waiting for lines…")))))
     .child(div().w_full().flex_none().px(12).py(5).border_t(1).border_color(t.border).child(legend(t, L.typing
       ? [["enter", "next match"], ["esc", "back to the lines"]]
-      : [...(info ? [["h/l", "tabs"], up ? ["x", "stop"] : ["s", "start"], ...(up ? [["r", "restart"], ["T", "terminal"]] : [])] : []),
+      : [...(info ? [["h/l", "tabs"], up ? ["x", "stop"] : ["s", "start"], ...(up ? [["r", "restart"], ["T", "terminal"]] : []), ["d", "investigate"]] : []),
         ...(logsTab ? [["j/k", "line"], ["g/G", "top/end"], ["/", "search"], ["n/N", "match"], ["f", "follow"], ["t", "time"], ["y", "copy"]] : []), ["q", "close"]])));
 }

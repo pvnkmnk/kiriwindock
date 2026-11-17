@@ -501,7 +501,7 @@ export function brief({ stack, row, container: c, lines, loop }) {
     `Container: ${c.name}`,
     `Image: ${c.image}`,
     `State: ${c.state}${c.health ? `, health ${c.health}` : ""}${loop ? ", in a restart loop" : ""}`,
-    `Problem: ${why(c) || (loop ? "it keeps restarting" : "not known")}`,
+    `Problem: ${why(c) || (loop ? "it keeps restarting" : "none that Docker reports")}`,
     `Restarts: ${c.restarts ?? 0}`,
     c.healthOutput ? `Health check output: ${c.healthOutput.split(/\r?\n/).filter(Boolean).slice(-3).join(" | ")}` : null,
     c.command ? `Command: ${c.command}` : null,
@@ -511,7 +511,9 @@ export function brief({ stack, row, container: c, lines, loop }) {
   ].filter(Boolean);
   const log = (lines ?? []).slice(-100).map((l) => (l.length > 400 ? `${l.slice(0, 400)}…` : l));
   return [
-    `The Docker container for "${row?.name ?? c.name}"${stack ? ` in the compose project "${stack.name}"` : ""} is failing. Find the cause and propose a fix.`,
+    why(c) || loop
+      ? `The Docker container for "${row?.name ?? c.name}"${stack ? ` in the compose project "${stack.name}"` : ""} is failing. Find the cause and propose a fix.`
+      : `Look into the Docker container for "${row?.name ?? c.name}"${stack ? ` in the compose project "${stack.name}"` : ""}. Docker reports no failure. Say what state it is in and point out anything in its logs that looks wrong.`,
     "",
     "What Docker reports:",
     ...facts.map((f) => `- ${f}`),
@@ -523,7 +525,7 @@ export function brief({ stack, row, container: c, lines, loop }) {
     "- Do not run docker compose up, down, build or restart, and do not stop or remove containers. Dockr manages them.",
     "- Read-only commands such as docker logs and docker inspect are fine.",
     "- Do not print environment values or open .env files.",
-    "- Say the cause first, then the fix. Ask before you change files.",
+    why(c) || loop ? "- Say the cause first, then the fix. Ask before you change files." : "- Say what you found first. Ask before you change files.",
   ].join("\n");
 }
 
@@ -745,7 +747,7 @@ export function keyAction(k, item, facts = {}) {
   if (k === "t") return facts.running ? row("terminal") : null;
   if (k === "c") return facts.service ? row("source") : null;
   if (k === "b") return facts.service ? row("rebuild") : null;
-  if (k === "d") return facts.bad ? row("diagnose") : null;
+  if (k === "d") return facts.created ? row("diagnose") : null;
   if (k === "o") return facts.link ? row("browser") : null;
   if (k === "y") return facts.created ? row("copy") : null;
   if (k === "m") return row("menu");

@@ -14,7 +14,7 @@ A dialog that lists Docker containers and sets which checkout each compose servi
 - **Links.** A container's configured links or published ports open in the browser.
 - **Checkout picker.** Move a service to one of its worktrees, or check a branch with no worktree out in the main checkout. Each choice says whether it costs a recreate or a rebuild, and Undo goes back. It offers to move the other services that have a worktree on the same branch.
 - **Failures explained.** The row says why a container failed, with its last three log lines. Three exits in a minute show as a restart loop.
-- **Diagnose.** Sends an agent Docker's report and the last 100 log lines, after showing you the exact text.
+- **Diagnose.** For any container, failed or not: sends an agent Docker's report and the last 100 log lines, after showing you the exact text.
 - **Drift and stale images.** Flags a service running a different checkout than the one set, and an image older than its dependency files.
 - **Toasts.** A mark in your status bar counts running containers and posts a toast when a service starts, fails, turns unhealthy or keeps restarting.
 - **Disk.** What the Stack and Docker hold, and a clean-up that never removes volumes.

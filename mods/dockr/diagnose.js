@@ -44,7 +44,7 @@ export function render(self, t) {
       .child(div().font_semibold().child(`Diagnose ${d.service}`))
       .child(div().flex_1().min_w(0).truncate().text_size(11).text_color(t.dim).child(d.why)))
     .child(div().flex_none().text_size(11).text_color(t.muted)
-      .child("An agent gets the text below as its first message. It holds no environment values. Read the log lines before sending: a program can print a secret."))
+      .child("An agent gets the text below as its first message. It holds no environment values. Read the log and build lines before sending: a program or a build step can print a secret."))
     .child(div().id("brief").flex_1().min_h(0).overflow_y_scrollbar().rounded(6).border_1().border_color(t.border).bg(t.background).p(8)
       .child(v_flex().w_full().font_family(mono).text_size(11).text_color(t.muted)
         .children(d.brief.split("\n").map((l) => div().w_full().min_h(15).child(l || " ")))))

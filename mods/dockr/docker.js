@@ -278,9 +278,9 @@ export async function terminal(machine, cwd, labels, script) {
   } catch { return { error: "herdr-core did not say which terminal it started" }; }
 }
 
-/** The screen of a terminal Dockr started, as text. "" when it cannot be read. */
-export async function screen(address) {
-  const r = await hc(["read", address]).catch(failed);
+/** The screen of a terminal Dockr started, as text, with `history` lines from above it. "" when it cannot be read. */
+export async function screen(address, history = 0) {
+  const r = await hc(["read", address, ...(history ? ["--lines", String(history)] : [])]).catch(failed);
   return r.code === 0 ? r.stdout : "";
 }
 

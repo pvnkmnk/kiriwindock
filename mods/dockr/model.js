@@ -495,7 +495,7 @@ export function explain(text, machine = null) {
  * What an agent is told about a failing container. It holds what Docker reports and the last log
  * lines, and no environment values.
  */
-export function brief({ stack, row, container: c, lines, loop }) {
+export function brief({ stack, row, container: c, lines, loop, build = null }) {
   const src = row?.actual ?? row?.set ?? null;
   const facts = [
     `Container: ${c.name}`,
@@ -510,8 +510,11 @@ export function brief({ stack, row, container: c, lines, loop }) {
     stack?.compose ? `Compose file: ${stack.compose}` : null,
   ].filter(Boolean);
   const log = (lines ?? []).slice(-100).map((l) => (l.length > 400 ? `${l.slice(0, 400)}…` : l));
+  const built = build?.lines?.length ? build : null, broke = built && built.failed != null;
   return [
-    why(c) || loop
+    broke && !(why(c) || loop)
+      ? `"${built.title}" failed for "${row?.name ?? c.name}"${stack ? ` in the compose project "${stack.name}"` : ""}. Find the cause in its output below and propose a fix.`
+      : why(c) || loop
       ? `The Docker container for "${row?.name ?? c.name}"${stack ? ` in the compose project "${stack.name}"` : ""} is failing. Find the cause and propose a fix.`
       : `Look into the Docker container for "${row?.name ?? c.name}"${stack ? ` in the compose project "${stack.name}"` : ""}. Docker reports no failure. Say what state it is in and point out anything in its logs that looks wrong.`,
     "",
@@ -520,12 +523,13 @@ export function brief({ stack, row, container: c, lines, loop }) {
     "",
     log.length ? `Its last ${log.length} log lines:` : "It wrote no log lines.",
     ...log,
+    ...(built ? ["", `The last ${built.lines.length} lines that "${built.title}" printed (${broke ? `it failed with exit code ${built.failed}` : "it is still working"}):`, ...built.lines] : []),
     "",
     "Rules:",
     "- Do not run docker compose up, down, build or restart, and do not stop or remove containers. Dockr manages them.",
     "- Read-only commands such as docker logs and docker inspect are fine.",
     "- Do not print environment values or open .env files.",
-    why(c) || loop ? "- Say the cause first, then the fix. Ask before you change files." : "- Say what you found first. Ask before you change files.",
+    why(c) || loop || broke ? "- Say the cause first, then the fix. Ask before you change files." : "- Say what you found first. Ask before you change files.",
   ].join("\n");
 }
 
@@ -888,4 +892,13 @@ export function buildLine(screen, service = null) {
   const step = (mine.length ? mine : steps.filter((m) => !service || !m[2])).pop() ?? steps[steps.length - 1];
   const text = step ? step[1].replace(/ \d+(\.\d+)?s$/, "") : (lines.filter((l) => !/^Failed with exit code|^=> =>/.test(l)).pop() ?? "");
   return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+}
+
+/**
+ * What a build or bring-up printed, from its terminal's screen and history: its last `max` lines
+ * that say something, each cut to 400 characters, without Dockr's own "Failed with exit code" line.
+ */
+export function buildLog(screen, max = 80) {
+  return clean(screen).split(/\r?\n/).map((l) => l.trimEnd()).filter((l) => /\S/.test(l) && !/^Failed with exit code \d+\. Press Enter/.test(l))
+    .slice(-max).map((l) => (l.length > 400 ? `${l.slice(0, 400)}…` : l));
 }

@@ -554,3 +554,20 @@ test("the build line is the newest step on the terminal's screen, for the row's 
   assert.equal(m.buildLine(" ✔ Container p-web-1  Recreated   0.4s\n ⠋ Container p-web-1  Starting\n"), "⠋ Container p-web-1 Starting");
   assert.equal(m.buildLine("\n\n"), "");
 });
+
+test("the brief carries what a failed build printed, and buildLog keeps only its last lines", () => {
+  const c = { name: "p-web-1", image: "p-web", state: "running", health: null, restarts: 0 };
+  const screen = "\x1b[32m => [web 3/6] RUN npm ci\x1b[0m\r\n\n" + "y".repeat(900) + "\nnpm ERR! missing script\n\nFailed with exit code 17. Press Enter to close.\n";
+  const lines = m.buildLog(screen);
+  assert.deepEqual([lines[0], lines[2]], [" => [web 3/6] RUN npm ci", "npm ERR! missing script"]);
+  assert.equal(lines.length, 3);
+  assert.equal(lines[1].length, 401);
+  assert.equal(m.buildLog("a\nb\nc", 2).join(), "b,c");
+  const text = m.brief({ stack: { name: "p" }, row: { name: "web" }, container: c, lines: ["ready"], build: { title: "Rebuild web", failed: "17", lines } });
+  assert.match(text, /^"Rebuild web" failed for "web" in the compose project "p"\./);
+  assert.match(text, /The last 3 lines that "Rebuild web" printed \(it failed with exit code 17\):\n => \[web 3\/6\] RUN npm ci\n/);
+  assert.match(text, /Say the cause first/);
+  const working = m.brief({ stack: null, row: { name: "web" }, container: c, lines: [], build: { title: "Rebuild web", failed: null, lines: ["step"] } });
+  assert.match(working, /printed \(it is still working\):\nstep/);
+  assert.equal(m.brief({ stack: null, row: { name: "web" }, container: c, lines: [], build: { title: "x", failed: "1", lines: [] } }).includes("printed"), false);
+});

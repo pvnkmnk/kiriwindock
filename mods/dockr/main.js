@@ -409,13 +409,16 @@ export default class Dockr extends View {
     const stack = r.stack ? this.store.stack(r.stack) : null;
     const machine = stack ? stack.machine ?? null : this.store.machineOf(c);
     const lines = await docker.lastLines(machine, c.id, 100);
+    // A build or bring-up for it that is working, or failed and still open: what it printed goes along.
+    const op = r.stack && r.service ? model.opFor(this.ops(), r.stack, r.name) : null;
+    const build = op ? { title: op.title, failed: op.failed, lines: model.buildLog(await docker.screen(op.address, 300)) } : null;
     const src = r.actual ?? r.set ?? null;
     openOverlay({
       mod: "dockr", kind: "dialog", width: 720, height: 560,
       props: { diagnose: {
         service: r.name, machine, folder: src?.path ?? stack?.dir ?? null, branch: src?.branch ?? null,
         why: model.why(c) || this.store.status(c).text || c.state,
-        brief: model.brief({ stack, row: r, container: c, lines, loop: this.store.looping(c) }),
+        brief: model.brief({ stack, row: r, container: c, lines, loop: this.store.looping(c), build }),
       } },
     });
     cx.notify();

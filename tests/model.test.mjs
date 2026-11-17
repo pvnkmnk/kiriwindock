@@ -266,7 +266,7 @@ test("programIcon and explain", () => {
   assert.equal(m.programIcon({ image: "shop-local-gateway", command: "npm run dev" }), "icons/node.svg");
   assert.equal(m.programIcon({ image: "shop-local-billing", command: "dotnet Billing.API.dll" }), "icons/dotnet.svg");
   assert.equal(m.programIcon({ image: "mcr.microsoft.com/mssql/server", command: "/opt/mssql/bin/sqlservr" }), "icons/docker.svg");
-  assert.match(m.explain("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?", "wsl"), /^Docker is not running on wsl\./);
+  assert.match(m.explain("Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?", "wsl"), /^Docker is not running\./);
   assert.match(m.explain("Bind for 127.0.0.1:3010 failed: port is already allocated"), /^Port 3010 is already in use/);
   assert.equal(m.explain("line one\nno configuration file provided: not found\n"), "no configuration file provided: not found");
 });
@@ -500,6 +500,6 @@ test("the dashboard sums what the stats say and names what needs a look", () => 
 test("a stopped Docker Desktop is named as such, whatever it printed", () => {
   const stub = "\nThe command 'docker' could not be found in this WSL 2 distro.\nWe recommend to activate the WSL integration in Docker Desktop settings.\n\nhttps://docs.docker.com/go/wsl2/\n";
   for (const text of [stub, "Cannot connect to the Docker daemon at unix:///var/run/docker.sock.", "docker events ended"]) {
-    assert.equal(m.explain(text, "wsl"), "Docker is not running on wsl. Start it, then press Refresh.");
+    assert.equal(m.explain(text, "wsl"), "Docker is not running. Start it, then press Refresh.");
   }
 });

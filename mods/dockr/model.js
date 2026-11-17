@@ -477,7 +477,7 @@ export function programIcon(c) {
 /** A Docker or compose error in words that say what to do. Unknown ones keep their last line. */
 export function explain(text, machine = null) {
   const s = String(text ?? ""), where = machine ? ` on ${machine}` : "";
-  if (/cannot connect to the docker daemon|is the docker daemon running|error during connect|dockerDesktopLinuxEngine|could not be found in this WSL 2 distro|docker (events|stats) ended|timed out/i.test(s)) return `Docker is not running${where}. Start it, then press Refresh.`;
+  if (/cannot connect to the docker daemon|is the docker daemon running|error during connect|dockerDesktopLinuxEngine|could not be found in this WSL 2 distro|docker (events|stats) ended|timed out/i.test(s)) return "Docker is not running. Start it, then press Refresh.";
   if (/port is already allocated|address already in use/i.test(s)) {
     const port = /(?:0\.0\.0\.0|127\.0\.0\.1|\[::\]|:::?):(\d+)/.exec(s)?.[1];
     return `Port ${port ?? "it needs"} is already in use. Stop what holds it, then try again.`;

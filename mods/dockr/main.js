@@ -22,6 +22,7 @@ import { assignLetters, letterBadge, navigateByLetter } from "./kit/letters.js";
 
 const icon = (name) => `mods/dockr/icons/${name}.svg`;
 const OPEN = "dockr.open"; // true while the dialog is open: the status bar's copy then posts no toasts
+const WAKE = "dockr.wake"; // set when the dialog reads Docker again: the status bar's copy then does too, which restarts a watch that ended
 const REQUEST = "dockr.request"; // the picker's ask, handed to the panel through shared state
 const load = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback; } catch { return fallback; } };
 const idOf = (s) => String(s).replace(/[^A-Za-z0-9_-]/g, "_");
@@ -111,6 +112,8 @@ export default class Dockr extends View {
     this.note = "";
     this.undo = null;
     this.dashDisk = null;
+    if (!this.chip) setShared(WAKE, Date.now());
+    this.seenWake = shared(WAKE) ?? 0;
     this.statsOff.clear();
     this.post(await this.store.reload());
     for (const m of this.store.machines()) this.watch(cx, m);
@@ -127,10 +130,13 @@ export default class Dockr extends View {
     cx.spawn(async (cx) => {
       let since = "";
       for (;;) {
+        const began = Date.now();
         const r = await docker.waitEvent(machine || null, since);
+        // A wait that ends at once with nothing to say did not wait: stop, never spin.
+        if (!r.error && !r.event && Date.now() - began < 3000) r.error = "docker events ended";
         if (r.error) {
           this.watching.delete(machine);
-          this.watchErrors[machine] = `Not watching Docker${machine ? ` on ${machine}` : ""}: ${model.explain(r.error, machine || null)} Reload tries again.`;
+          this.watchErrors[machine] = `Not watching Docker${machine ? ` on ${machine}` : ""}: ${model.explain(r.error, machine || null)} Refresh tries again.`;
           cx.notify();
           return;
         }
@@ -178,12 +184,13 @@ export default class Dockr extends View {
   async close() { if (this.modal) setShared(OPEN, false); }
 
   /** The status bar's mark: how many containers run, red when one has failed. A click opens the dialog. */
-  renderChip(t) {
+  renderChip(t, cx) {
+    if ((shared(WAKE) ?? 0) !== this.seenWake) { this.seenWake = shared(WAKE) ?? 0; cx.spawn(async (cx) => { await this.reload(cx); }); }
     const all = this.store.containers(), up = all.filter((c) => c.state === "running").length;
     const bad = all.filter((c) => this.store.status(c).kind === "bad");
     const deaf = Object.values(this.watchErrors);
     if (deaf.length) return h_flex().id("dockr-chip").size_full().px(10).gap(6).items_center().justify_center().bg(t.chrome).border_t(1).border_color(t.border)
-      .text_size(11.8).text_color(t.ansi3).cursor_pointer().tooltip(`${deaf.join(" ")} Click to open Dockr.`).on_click(() => run("mod.open", { name: "dockr" }))
+      .text_size(11.8).text_color(t.ansi3).cursor_pointer().tooltip(`${deaf.join(" ").replace(/ Refresh tries again\./g, "")} Opening Dockr tries again.`).on_click(() => run("mod.open", { name: "dockr" }))
       .child(svg("icons/docker.svg").size(14).flex_none().text_color(t.ansi3)).child(div().child("!"));
     const tip = bad.length ? `${bad.map((c) => c.name).join(", ")}: ${bad.length === 1 ? "needs" : "need"} a look` : `${up} of ${all.length} containers running`;
     return h_flex().id("dockr-chip").size_full().px(10).gap(6).items_center().justify_center().bg(t.chrome).border_t(1).border_color(t.border)
@@ -302,6 +309,9 @@ export default class Dockr extends View {
 
   /** Starts a prepared action's script in a background terminal. The row shows its progress. */
   async runOp(cx, p, show = false) {
+    // With Docker stopped the script would only fail in a terminal nobody is looking at: say so here.
+    const down = p.script && !p.error ? await docker.alive(p.stack.machine ?? null) : null;
+    if (down) { this.note = `${p.title}: ${down}`; cx.notify(); return; }
     if (p.undo !== undefined) this.undo = Object.keys(p.undo.targets).length ? { ...p.undo, label: Object.values(p.undo.targets).map(model.sourceName).join(", ") } : null;
     if (p.error || !p.script) { this.note = p.error ?? p.note ?? ""; cx.notify(); return; }
     const r = await docker.terminal(p.stack.machine, p.stack.dir, { stack: p.stack.name, ...p.labels }, p.script);
@@ -962,7 +972,7 @@ export default class Dockr extends View {
     if (this.logging) return logs.render(this, t);
     if (this.menuing) return menu.render(this, t);
     if (this.disking) return disk.render(this, t);
-    if (this.chip) return this.renderChip(t);
+    if (this.chip) return this.renderChip(t, cx);
     return this.renderPanel(t, cx);
   }
 }

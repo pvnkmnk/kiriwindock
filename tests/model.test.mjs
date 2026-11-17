@@ -496,3 +496,10 @@ test("the dashboard sums what the stats say and names what needs a look", () => 
   assert.deepEqual(d.attention.map((a) => [a.name, a.why]), [["db", "memory at 95% of its limit"], ["x", "exited 2"]]);
   assert.deepEqual(d.history, { cpu: [10, 35], mem: [100, 1150] });
 });
+
+test("a stopped Docker Desktop is named as such, whatever it printed", () => {
+  const stub = "\nThe command 'docker' could not be found in this WSL 2 distro.\nWe recommend to activate the WSL integration in Docker Desktop settings.\n\nhttps://docs.docker.com/go/wsl2/\n";
+  for (const text of [stub, "Cannot connect to the Docker daemon at unix:///var/run/docker.sock.", "docker events ended"]) {
+    assert.equal(m.explain(text, "wsl"), "Docker is not running on wsl. Start it, then press Refresh.");
+  }
+});

@@ -477,7 +477,7 @@ export function programIcon(c) {
 /** A Docker or compose error in words that say what to do. Unknown ones keep their last line. */
 export function explain(text, machine = null) {
   const s = String(text ?? ""), where = machine ? ` on ${machine}` : "";
-  if (/cannot connect to the docker daemon|is the docker daemon running|error during connect|dockerDesktopLinuxEngine/i.test(s)) return `Docker is not running${where}. Start Docker Desktop, then press Reload.`;
+  if (/cannot connect to the docker daemon|is the docker daemon running|error during connect|dockerDesktopLinuxEngine|could not be found in this WSL 2 distro|docker (events|stats) ended|timed out/i.test(s)) return `Docker is not running${where}. Start it, then press Refresh.`;
   if (/port is already allocated|address already in use/i.test(s)) {
     const port = /(?:0\.0\.0\.0|127\.0\.0\.1|\[::\]|:::?):(\d+)/.exec(s)?.[1];
     return `Port ${port ?? "it needs"} is already in use. Stop what holds it, then try again.`;
@@ -486,7 +486,7 @@ export function explain(text, machine = null) {
   if (/program not found|command not found|executable file not found|cannot start (docker|bash|sh)\b/i.test(s)) return `Docker's command line was not found${where}.`;
   if (/no such service/i.test(s)) return "The compose file has no service by that name. Check dockr.json.";
   if (/no such file or directory/i.test(s) && /\.ya?ml|compose/i.test(s)) return "The compose file is not where dockr.json says it is.";
-  if (/unreachable|not connected|no such machine/i.test(s)) return `Herdr cannot reach${machine ? ` ${machine}` : " that Machine"}. Connect it, then press Reload.`;
+  if (/unreachable|not connected|no such machine/i.test(s)) return `Herdr cannot reach${machine ? ` ${machine}` : " that Machine"}. Connect it, then press Refresh.`;
   return s.trim().split(/\r?\n/).pop() ?? "";
 }
 

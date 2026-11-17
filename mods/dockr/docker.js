@@ -41,10 +41,23 @@ last=""
 if IFS= read -r -t "$max" line <&"\${D[0]}"; then
   last="$line"
   while IFS= read -r -t 0.7 line <&"\${D[0]}"; do last="$line"; done
+  # Docker Desktop's stand-in for a stopped engine prints its message here, not an event.
+  case "$last" in "{"*) ;; *) echo "$last" >&2; echo "docker events ended" >&2; exit 3 ;; esac
+elif [ $? -le 128 ]; then
+  # Not a timeout: the stream ended by itself, so Docker is not running. Say why and fail.
+  docker version --format '{{.Server.Version}}' >&2 2>&1 || true
+  echo "docker events ended" >&2
+  exit 3
 fi
 kill "$D_PID" 2>/dev/null
 printf '%s\\n' "$last"
 `;
+
+/** Null when Docker answers on the Machine, else why it does not, in words for the person. */
+export async function alive(machine) {
+  const r = await exec("docker", ["version", "--format", "{{.Server.Version}}"], { ...on(machine), timeout: 8000 }).catch(failed);
+  return r.code === 0 ? null : explain(r.stderr || r.stdout || "cannot connect to the docker daemon", machine);
+}
 
 /** A decimal string plus one. */
 function plusOne(digits) {
@@ -63,7 +76,7 @@ function plusOne(digits) {
  */
 export async function waitEvent(machine, since) {
   const r = await exec("bash", ["-c", WAIT, "dockr", since ?? "", "570"], { ...on(machine), timeout: 600000 }).catch(failed);
-  if (r.code !== 0) return { error: said(r) };
+  if (r.code !== 0) return { error: (r.stderr || r.stdout || `exited ${r.code}`).trim() };
   const nano = /"timeNano":(\d{10,})/.exec(r.stdout)?.[1];
   if (!nano) return { event: false };
   const next = plusOne(nano);
@@ -118,6 +131,8 @@ while IFS= read -r -t "$1" line <&"\${D[0]}"; do
   case "$line" in *$'\\033[H'*) [ $seen -eq 1 ] && [ -n "$out" ] && break; seen=1; out="" ;; esac
   out="$out$line"$'\\n'
 done
+# No frame at all: the stream ended by itself, so Docker is not running.
+[ $seen -eq 0 ] && { echo "docker stats ended" >&2; exit 3; }
 kill "$D_PID" 2>/dev/null
 printf '%s' "$out"
 `;

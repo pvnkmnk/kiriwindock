@@ -81,6 +81,7 @@ export default class Dockr extends View {
     this.told = new Set();     // failed builds already announced
     this.stats = {};           // container name -> its last CPU and memory samples, while the panel shows
     this.sampling = new Set(); // machines with a stats wait running
+    this.screens = {};         // a build or bring-up's terminal address -> its screen, while it works
     this.boot = {};            // container name -> its newest log line, while it boots
     this.following = new Set(); // container names with a boot line wait running
     this.statsOff = new Set(); // machines whose stats wait could not run
@@ -170,6 +171,25 @@ export default class Dockr extends View {
           cx.notify();
         }
       } finally { this.sampling.delete(machine); this.noteHidden(); }
+    });
+  }
+
+  /**
+   * Follows the terminal of a build or bring-up for its screen, which its rows show a line of as
+   * the step it is on. It ends when the work ends or fails, or the list is not shown.
+   */
+  followOp(cx, address) {
+    if (address in this.screens) return;
+    this.screens[address] = "";
+    const still = () => this.visible() && this.ops().some((o) => o.address === address && o.failed == null);
+    cx.spawn(async (cx) => {
+      try {
+        while (still()) {
+          this.screens[address] = await docker.screen(address);
+          cx.notify();
+          if (!(await docker.waitOutput(address))) return;
+        }
+      } finally { delete this.screens[address]; cx.notify(); }
     });
   }
 
@@ -691,7 +711,12 @@ export default class Dockr extends View {
         .child(right))
       .child(second);
     if (cause) out.child(this.renderFailure(t, r, cause));
-    else if (model.booting(c)) {
+    else if (op && op.failed == null && !model.booting(c) && model.buildLine(this.screens[op.address], r.name)) {
+      // What its build or bring-up is doing: the newest step on that terminal's screen.
+      const line = model.buildLine(this.screens[op.address], r.name);
+      out.child(h_flex().w_full().pl(this.kb ? 78 : 49).pr(10).pb(5).gap(6).items_center()
+        .child(div().flex_1().min_w(0).truncate().tooltip(line).font_family(settings().font_family ?? "JetBrains Mono").text_size(10.5).text_color(t.muted).child(line)));
+    } else if (model.booting(c)) {
       // What it is doing while it boots: its newest log line, else what its health check last said.
       const line = this.boot[c.name] || (c.healthOutput ?? "").split(/\r?\n/).filter(Boolean).pop() || "";
       if (line) out.child(h_flex().w_full().pl(this.kb ? 78 : 49).pr(10).pb(5).gap(6).items_center()
@@ -780,6 +805,7 @@ export default class Dockr extends View {
     this.wasShown = shown;
     if (shown) for (const m of Object.keys(this.store.byMachine)) this.sample(cx, m);
     if (shown) for (const [m, list] of Object.entries(this.store.byMachine)) for (const c of list) if (model.booting(c)) this.followBoot(cx, m, c.name);
+    if (shown) for (const o of this.ops()) if (o.kind === "op" && o.failed == null) this.followOp(cx, o.address);
     this.takeRequest(cx);
 
     this.kb = this.modal || this.handle.is_focused() || this.typing;

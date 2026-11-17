@@ -278,6 +278,24 @@ export async function terminal(machine, cwd, labels, script) {
   } catch { return { error: "herdr-core did not say which terminal it started" }; }
 }
 
+/** The screen of a terminal Dockr started, as text. "" when it cannot be read. */
+export async function screen(address) {
+  const r = await hc(["read", address]).catch(failed);
+  return r.code === 0 ? r.stdout : "";
+}
+
+/**
+ * Waits until a terminal prints a new line, at most a minute, then a second more so a busy build
+ * is read about once a second. Resolves false when the terminal has ended or cannot be waited on.
+ */
+export async function waitOutput(address) {
+  const r = await hc(["wait", address, "--output", "\n", "--timeout", "60", "--json"]).catch(failed);
+  if (r.code !== 0) return false;
+  try { if (JSON.parse(r.stdout).reason === "exit") return false; } catch { return false; }
+  const pause = await hc(["wait", address, "--timeout", "1", "--json"]).catch(failed);
+  try { return pause.code === 0 && JSON.parse(pause.stdout).reason !== "exit"; } catch { return false; }
+}
+
 /** Ends a terminal Dockr started. */
 export const kill = (address) => hc(["kill", address]).catch(() => null);
 

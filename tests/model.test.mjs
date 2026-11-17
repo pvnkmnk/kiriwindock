@@ -543,3 +543,14 @@ test("the boot line is the newest log line that says something", () => {
   assert.equal(m.bootLine([{ text: "x".repeat(300) }]).length, 201);
   assert.equal(m.bootLine([]), "");
 });
+
+test("the build line is the newest step on the terminal's screen, for the row's service when named", () => {
+  const screen = [" => [internal] load build context", " => => transferring context: 25B", " => CACHED [2/6] WORKDIR /app", " => [3/6] RUN echo one && sleep 3     3.1s", " => [4/6] RUN npm ci", " => => # added 12 packages", ""].join("\n");
+  assert.equal(m.buildLine(screen), "[4/6] RUN npm ci");
+  const two = [" => [web 2/5] COPY package.json ./", " => [api 3/4] RUN dotnet restore   12.0s", " => [web 3/5] RUN npm ci"].join("\n");
+  assert.equal(m.buildLine(two, "api"), "[api 3/4] RUN dotnet restore");
+  assert.equal(m.buildLine(two, "web"), "[web 3/5] RUN npm ci");
+  assert.equal(m.buildLine(two, "other"), "[web 3/5] RUN npm ci");
+  assert.equal(m.buildLine(" ✔ Container p-web-1  Recreated   0.4s\n ⠋ Container p-web-1  Starting\n"), "⠋ Container p-web-1 Starting");
+  assert.equal(m.buildLine("\n\n"), "");
+});

@@ -875,3 +875,17 @@ export function bootLine(lines) {
   }
   return "";
 }
+
+/**
+ * The step a build or bring-up is on, from its terminal's screen: the newest build step line
+ * (" => [web 4/6] RUN npm ci"), for `service` when the screen names services, else the last line
+ * that says something. "" when there is none.
+ */
+export function buildLine(screen, service = null) {
+  const lines = clean(screen).split(/\r?\n/).map((l) => l.replace(/\s+/g, " ").trim()).filter((l) => /[A-Za-z0-9]/.test(l));
+  const steps = lines.map((l) => /^=> (?:CACHED )?(\[(?:(\S+) )?\d+\/\d+\] .*)$/.exec(l)).filter(Boolean);
+  const mine = service ? steps.filter((m) => m[2] === service) : [];
+  const step = (mine.length ? mine : steps.filter((m) => !service || !m[2])).pop() ?? steps[steps.length - 1];
+  const text = step ? step[1].replace(/ \d+(\.\d+)?s$/, "") : (lines.filter((l) => !/^Failed with exit code|^=> =>/.test(l)).pop() ?? "");
+  return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+}

@@ -704,7 +704,7 @@ export function looseBranches(branches, sources) {
 }
 
 /** The letters Dockr's own keys use, so no row is given one of them as its hint. */
-export const KEY_LETTERS = "sxrutcbdoyhlgmqjk";
+export const KEY_LETTERS = "sxrutcbpdoyhlgmqjk";
 
 /**
  * The panel as one list for the keyboard: each group's header, then its rows unless it is folded.
@@ -753,6 +753,7 @@ export function keyAction(k, item, facts = {}) {
   if (k === "b") return facts.service ? row("rebuild") : null;
   if (k === "d") return facts.created ? row("diagnose") : null;
   if (k === "o") return facts.link ? row("browser") : null;
+  if (k === "p") return facts.output ? row("output") : null;
   if (k === "y") return facts.created ? row("copy") : null;
   if (k === "m") return row("menu");
   return null;
@@ -760,7 +761,7 @@ export function keyAction(k, item, facts = {}) {
 
 /** The few keys the legend always shows: move, open, the start or stop that applies, restart, and how to see the rest. */
 export function coreHints(item, facts = {}) {
-  const core = new Set(["j/k", "enter", "s", "x", "r"]);
+  const core = new Set(["j/k", "enter", "s", "x", "r", "p"]);
   return [...keyHints(item, facts).filter(([k]) => core.has(k)), ["?", "all keys"]];
 }
 
@@ -771,7 +772,7 @@ export function keyHints(item, facts = {}) {
   if (item?.kind === "group") { add("enter", "enter", "fold"); }
   add("enter", "enter", item?.kind === "row" ? "open" : null);
   add("s", null, "start"); add("x", null, "stop"); add("r", null, "restart"); add("t", null, "terminal");
-  add("c", null, "checkout"); add("b", null, "rebuild"); add("d", null, "diagnose"); add("o", null, "browser"); add("y", null, "copy name");
+  add("c", null, "checkout"); add("b", null, "rebuild"); add("p", null, "build output"); add("d", null, "diagnose"); add("o", null, "browser"); add("y", null, "copy name");
   add("u", null, "start all"); add("shift-x", "X", "stop all"); add("shift-d", "D", "remove");
   add("m", null, "menu");
   all.push(["/", "search"], ["q", "leave"]);

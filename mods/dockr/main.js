@@ -271,13 +271,16 @@ export default class Dockr extends View {
   /** How a log or container view opens. Herdr draws windows under dialogs, so the dialog opens them as dialogs on top of itself. */
   over(key) { return this.modal ? { kind: "dialog" } : { kind: "window", key }; }
 
+  /** The build or bring-up of a row's Service whose terminal is still open: working, or failed and not dismissed. */
+  opOf(r) { return r?.stack ? model.opFor(this.ops(), r.stack, r.name) : null; }
+
   /** What the keys need to know about the selected item. */
   facts(item) {
     if (!item) return {};
     const gs = item.group.state, group = { anyDown: gs.running < gs.total, anyUp: gs.running > 0 };
     if (item.kind !== "row") return group;
     const r = item.row, c = r.container;
-    return { ...group, running: c?.state === "running", created: !!c, service: !!r.service, bad: !!c && this.store.status(c).kind === "bad", link: !!this.links[r.key] };
+    return { ...group, running: c?.state === "running", created: !!c, service: !!r.service, bad: !!c && this.store.status(c).kind === "bad", link: !!this.links[r.key], output: !!this.opOf(r) };
   }
 
   setTab(tab) { this.tab = tab; this.help = false; localStorage.setItem("tab", tab); }
@@ -537,6 +540,7 @@ export default class Dockr extends View {
     if (!r) return;
     const c = r.container, managed = !!r.stack;
     if (action === "open") return this.openContainer(r);
+    if (action === "output") { const op = this.opOf(r); if (op) this.peek(op.address, op.title, true); return; }
     if (action === "browser") return docker.openUrl(arg);
     if (action === "diagnose") return this.openDiagnose(cx, r);
     if (action === "source") return this.openPicker(cx, r);
@@ -602,6 +606,7 @@ export default class Dockr extends View {
   /** What a container offers, in the order Docker Desktop lists it. */
   menuItems(r) {
     const c = r.container, running = c?.state === "running", items = [];
+    if (this.opOf(r)) items.push({ label: "Show build output", action: "output", hint: "live" });
     if (c) items.push({ label: "Open", action: "open", hint: "Logs · Inspect · Stats" });
     if (running) items.push({ label: "Open terminal", action: "terminal" });
     for (const p of (c?.ports ?? []).slice(0, 3)) items.push({ label: `Open localhost:${p.host} in browser`, action: "browser", arg: model.portUrl(p.host) });
@@ -727,8 +732,10 @@ export default class Dockr extends View {
     else if (op && op.failed == null && !model.booting(c) && model.buildLine(this.screens[op.address], r.name)) {
       // What its build or bring-up is doing: the newest step on that terminal's screen.
       const line = model.buildLine(this.screens[op.address], r.name);
-      out.child(h_flex().w_full().pl(this.kb ? 78 : 49).pr(10).pb(5).gap(6).items_center()
-        .child(div().flex_1().min_w(0).truncate().tooltip(line).font_family(settings().font_family ?? "JetBrains Mono").text_size(10.5).text_color(t.muted).child(line)));
+      out.child(h_flex().id(`step-${id}`).w_full().pl(this.kb ? 78 : 49).pr(10).pb(5).gap(6).items_center().cursor_pointer()
+        .on_mouse_down("left", (_e, cx) => cx.stop_propagation())
+        .on_click(() => this.peek(op.address, op.title, true))
+        .child(div().flex_1().min_w(0).truncate().tooltip(`${line}\nClick to read the whole output as it runs`).font_family(settings().font_family ?? "JetBrains Mono").text_size(10.5).text_color(t.muted).child(line)));
     } else if (model.booting(c)) {
       // What it is doing while it boots: its newest log line, else what its health check last said.
       const line = this.boot[c.name] || (c.healthOutput ?? "").split(/\r?\n/).filter(Boolean).pop() || "";

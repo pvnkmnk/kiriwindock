@@ -91,6 +91,7 @@ The keys follow CodeyPacker's mods (`run`, `jump`, `branch`), so they are the sa
 | `t` | terminal |
 | `c` | change checkout |
 | `b` | rebuild image |
+| `p` | read the build or bring-up's output as it runs, while one is working or has failed |
 | `d` | investigate the container with an agent (Diagnose when it has failed) |
 | `o` | open its first link or port in the browser |
 | `y` | copy the container name |
@@ -117,7 +118,7 @@ The keys follow CodeyPacker's mods (`run`, `jump`, `branch`), so they are the sa
 
 **When something needs you**, the row says so in a sentence, with buttons:
 - **A failure:** why (`exited 137, out of memory`, `health check: connection refused`), the last three log lines, and `Diagnose`, `Logs`, `Start`. Three exits inside a minute show as `restart loop`.
-- **Diagnose** shows the exact text an agent will get: what Docker reports and the last 100 log lines, with no environment values. Read the log lines first, since a program can print a secret. `Send` starts the agent you pick in a new tab, in the space on that branch when there is one.
+- **Diagnose** shows the exact text an agent will get: what Docker reports and the last 100 log lines, with no environment values. When a build or bring-up of that service is working or has failed, its last 80 lines of output go along. Read the log and build lines first, since a program or a build step can print a secret. `Send` starts the agent you pick in a new tab, in the space on that branch when there is one.
 - **A different checkout than the one set** (drift), which a compose command run outside Dockr causes: switch back, or keep what runs.
 - **Dependency files changed since the image was built:** `Rebuild`.
 

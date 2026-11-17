@@ -571,3 +571,10 @@ test("the brief carries what a failed build printed, and buildLog keeps only its
   assert.match(working, /printed \(it is still working\):\nstep/);
   assert.equal(m.brief({ stack: null, row: { name: "web" }, container: c, lines: [], build: { title: "x", failed: "1", lines: [] } }).includes("printed"), false);
 });
+
+test("p opens the build output only while a build or bring-up has a terminal open", () => {
+  const item = { kind: "row", group: { name: "p", managed: true } };
+  assert.deepEqual(m.keyAction("p", item, { output: true }), { on: "row", action: "output" });
+  assert.equal(m.keyAction("p", item, {}), null);
+  assert.ok(m.coreHints(item, { output: true }).some(([k, what]) => k === "p" && what === "build output"));
+});

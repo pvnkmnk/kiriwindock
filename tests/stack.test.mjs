@@ -398,3 +398,21 @@ test("Down stops and removes the containers and keeps .dockr.env", opts, async (
   assert.equal(row("web").container, null);
   assert.equal(row("web").set.branch, "feat"); // The record survives: the next Up starts from it.
 });
+
+test("a new Store drawn from another's snapshot shows the same containers before it reads Docker", () => {
+  const a = new Store();
+  a.byMachine = { "": [{ id: "1", name: "p-web-1", state: "running", labels: {}, env: ["NAME"] }] };
+  a.stale = { "p/web": true };
+  a.imageHashes = { "img|package.json": "abc" };
+  a.loops = new Set(["p-web-1"]);
+  a.tails = { 1: { key: "k", lines: ["a log line"] } };
+  const snap = JSON.parse(JSON.stringify(a.snapshot()));
+  assert.equal(JSON.stringify(snap).includes("a log line"), false);
+  const b = new Store();
+  b.restore(snap);
+  assert.deepEqual(b.containers().map((c) => c.name), ["p-web-1"]);
+  assert.deepEqual([b.stale, b.imageHashes, [...b.loops], b.prev.length], [{ "p/web": true }, { "img|package.json": "abc" }, ["p-web-1"], 1]);
+  const c = new Store();
+  c.restore(null);
+  assert.deepEqual(c.containers(), []);
+});

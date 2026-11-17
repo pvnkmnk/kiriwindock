@@ -30,6 +30,24 @@ export class Store {
     this.save = save;
   }
 
+  /**
+   * What was read at the last look, for the next copy of the list to draw at once instead of
+   * starting empty. It holds no log lines, and containers carry environment names only.
+   */
+  snapshot() {
+    const { stacks, problems, env, has, sources, hosts, byMachine, errors, exits, stale, imageHashes } = this;
+    return { stacks, problems, env, has, sources, hosts, byMachine, errors, exits, stale, imageHashes, loops: [...this.loops] };
+  }
+
+  /** Takes a snapshot() back. The next reload() replaces it with what is true now. */
+  restore(snap) {
+    if (!snap || typeof snap !== "object" || !snap.byMachine) return;
+    const { loops, ...rest } = snap;
+    Object.assign(this, rest);
+    this.loops = new Set(loops ?? []);
+    this.prev = this.containers();
+  }
+
   machines() {
     const list = [...new Set(this.stacks.map((s) => s.machine ?? ""))];
     return list.length ? list : [""];

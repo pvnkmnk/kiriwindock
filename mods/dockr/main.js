@@ -25,6 +25,7 @@ const OPEN = "dockr.open"; // true while the dialog is open: the status bar's co
 const BACK = "dockr.back"; // set when a popup or dialog opened from the list closes: the list then takes the keyboard again
 const WAKE = "dockr.wake"; // set when the dialog reads Docker again: the status bar's copy then does too, which restarts a watch that ended
 const REQUEST = "dockr.request"; // the picker's ask, handed to the panel through shared state
+const LAST = "dockr.last"; // what the dialog knew when it closed, so the next one opens on it and not on an empty list
 const load = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key) ?? "null") ?? fallback; } catch { return fallback; } };
 const idOf = (s) => String(s).replace(/[^A-Za-z0-9_-]/g, "_");
 const mainTag = (s) => (s?.main ? "  · Main checkout" : "");
@@ -53,6 +54,7 @@ export default class Dockr extends View {
     this.chip = !!props()?.chip;
 
     this.store = new Store(load("built", {}), (built) => localStorage.setItem("built", JSON.stringify(built)));
+    if (this.modal) this.store.restore(shared(LAST)?.store);
     this.watching = new Set(); // machines with an event wait running
     this.watchErrors = {};     // machine -> why its wait stopped
     this.busy = {};            // row or stack key -> what a short action is doing to it
@@ -80,7 +82,7 @@ export default class Dockr extends View {
     this.hover = null;         // the row under the pointer
     this.pendingDown = null;   // the Stack a confirm dialog is asking about
     this.told = new Set();     // failed builds already announced
-    this.stats = {};           // container name -> its last CPU and memory samples, while the panel shows
+    this.stats = (this.modal && shared(LAST)?.stats) || {}; // container name -> its last CPU and memory samples, while the panel shows
     this.sampling = new Set(); // machines with a stats wait running
     this.screens = {};         // a build or bring-up's terminal address -> its screen, while it works
     this.boot = {};            // container name -> its newest log line, while it boots
@@ -230,7 +232,7 @@ export default class Dockr extends View {
 
   /** The dialog has closed: the status bar's copy posts the toasts again. */
   async close() {
-    if (this.modal) setShared(OPEN, false);
+    if (this.modal) { setShared(OPEN, false); setShared(LAST, { store: this.store.snapshot(), stats: this.stats }); }
     else if (!this.chip && props()?.overlay != null) setShared(BACK, Date.now());
   }
 

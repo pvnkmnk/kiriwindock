@@ -18,9 +18,7 @@ jobs:
         run: echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Display and software Vulkan, for the app's runtime
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends xvfb mesa-vulkan-drivers libvulkan1 \n            libxkbcommon-x11-0 libxkbcommon0
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends xvfb mesa-vulkan-drivers libvulkan1 libxkbcommon-x11-0 libxkbcommon0
 
       - name: herdr-app check
         run: |

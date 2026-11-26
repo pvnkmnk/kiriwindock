@@ -7,6 +7,7 @@
 > `docker stats --no-stream` one shot instead of following a stream that never ends.
 >
 > History is `git subtree split` of upstream's `dockr/` folder, so upstream's dockr commits are here.
+> MIT, as upstream — see [`LICENSE`](LICENSE).
 
 A dialog that lists Docker containers and sets which checkout each compose service runs from: the main checkout or a git worktree.
 
@@ -38,7 +39,7 @@ A dialog that lists Docker containers and sets which checkout each compose servi
 Tell your agent:
 
 ```text
-Read ~/.config/herdr-app/AGENTS.md, then add this mod: https://github.com/jbped/herdr-mods/tree/main/dockr
+Read ~/.config/herdr-app/AGENTS.md, then add this mod: https://github.com/pvnkmnk/kiriwindock
 ```
 
 Or by hand:
@@ -48,6 +49,15 @@ Or by hand:
 3. For toasts, add this block to your own layout, beside the status bar:
    `{ "id": "dockr-chip", "type": "block", "size": { "px": 64 }, "content": { "mod": "dockr", "props": { "chip": true } } }`
 4. Run `herdr-app check ~/.config/herdr-app/mods/dockr`, then press `ctrl-shift-d`.
+
+## Keys
+
+`ctrl-shift-d` opens the panel and closes it again. This repo's [`keys.json`](keys.json) binds it
+globally to `mod.open:dockr`, and inside the panel (`mod:dockr`) to `dockr.hide`; to use another
+key, edit that file here before merging it into `~/.config/herdr-app/keys.json`, or change the
+binding there afterwards. Every other key the panel answers to is listed in
+[`RECIPE.md`](RECIPE.md#panel-keys-after-ctrl-shift-d), and `?` in the panel lists the ones that
+act on the selected row.
 
 ## Use
 

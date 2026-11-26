@@ -1,5 +1,13 @@
 # Dockr
 
+> **kiriwindock** is [Dockr](https://github.com/jbped/herdr-mods/tree/main/dockr) as it runs on
+> [Kiri](https://github.com/libracoder/kiri) on Windows. Kiri's WSL2 dockerd never closes a Docker
+> stream, so both patches under `patches/` swap a stream for a bounded read: container changes are
+> polled instead of waiting on `docker events`, and Logs/Stats read `docker logs` and
+> `docker stats --no-stream` one shot instead of following a stream that never ends.
+>
+> History is `git subtree split` of upstream's `dockr/` folder, so upstream's dockr commits are here.
+
 A dialog that lists Docker containers and sets which checkout each compose service runs from: the main checkout or a git worktree.
 
 ![Dockr](preview.png)

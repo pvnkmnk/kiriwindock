@@ -8,6 +8,9 @@
 >
 > History is `git subtree split` of upstream's `dockr/` folder, so upstream's dockr commits are here.
 > MIT, as upstream — see [`LICENSE`](LICENSE).
+>
+> Version 1.0.0 is this repo's own (`VERSION`, and `version` in `mods/dockr/mod.json`);
+> upstream's dockr does not carry one.
 
 A dialog that lists Docker containers and sets which checkout each compose service runs from: the main checkout or a git worktree.
 

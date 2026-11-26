@@ -1,6 +1,7 @@
 {
   "place": "none",
   "title": "Dockr",
+  "version": "1.0.0",
   "overlay": {
     "kind": "dialog",
     "width": 760,

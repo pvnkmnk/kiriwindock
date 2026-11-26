@@ -1,0 +1,97 @@
+--- a/mods/dockr/docker.js	2026-11-26 05:37:12.207982100 -0500
++++ b/mods/dockr/docker.js	2026-11-26 05:37:12.209486100 -0500
+@@ -91,36 +91,14 @@
+   return { event: true, since: `${next.slice(0, -9)}.${next.slice(-9)}` };
+ }
+ 
+-// $1: container name, $2: the timestamp to continue from ("" starts with a tail), $3: the longest
+-// wait in seconds, $4: how many lines the first call starts with. Prints the new lines with their
+-// timestamps as soon as some arrive (at most 0.4 s of them), then "\001ended" when the stream ended.
+-const LOGS = `
+-c="$1"; since="$2"; max="$3"; tail="$4"
+-set -- docker logs -f --timestamps
+-if [ -n "$since" ]; then set -- "$@" --since "$since"; else set -- "$@" --tail "$tail"; fi
+-coproc D { exec "$@" "$c" 2>&1; }
+-n=0
+-IFS= read -r -t "$max" line <&"\${D[0]}"; rc=$?
+-if [ $rc -eq 0 ]; then
+-  printf '%s\\n' "$line"; n=1; end=$(( \${EPOCHREALTIME//[.,]/} + 400000 ))
+-  while [ $n -lt 4000 ] && [ \${EPOCHREALTIME//[.,]/} -lt $end ]; do
+-    IFS= read -r -t 0.15 line <&"\${D[0]}"; rc=$?
+-    [ $rc -eq 0 ] || break
+-    printf '%s\\n' "$line"; n=$((n+1))
+-  done
+-fi
+-kill "$D_PID" 2>/dev/null
+-[ $rc -eq 1 ] && printf '\\001ended\\n'
+-exit 0
+-`;
+-
+ /**
+- * Waits for a container's next log lines, at most a minute. Resolves { text } with the new lines
+- * (each starts with its timestamp, and a last line "\x01ended" says the container stopped writing),
+- * or { error } when the wait could not run.
++ * Reads a container's new log lines, at most a minute: { text } with each line prefixed by its
++ * timestamp. One-shot `docker logs`, not `logs -f`: this machine's engine (Kiri on Windows) never
++ * closes a followed stream, so the streaming version printed nothing and the log view stayed empty.
+  */
+ export async function waitLogs(machine, name, since, tail = 300) {
+-  const r = await exec("bash", ["-c", LOGS, "dockr", name, since ?? "", "60", String(tail)], { ...on(machine), timeout: 90000 }).catch(failed);
++  const args = ["logs", "--timestamps", ...(since ? ["--since", since] : ["--tail", String(tail)]), name];
++  const r = await exec("docker", args, { ...on(machine), timeout: 90000 }).catch(failed);
+   return r.code === 0 ? { text: r.stdout } : { error: said(r) };
+ }
+ 
+@@ -131,23 +109,15 @@
+   return r.code === 0 ? { started: r.stdout.includes("started") } : { error: said(r) };
+ }
+ 
+-// Prints one sample of every running container from Docker's stats stream. $1: the longest wait.
+-const STATS = `
+-coproc D { exec docker stats --format '{{.ID}}|{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}' 2>/dev/null; }
+-out=""; seen=0
+-while IFS= read -r -t "$1" line <&"\${D[0]}"; do
+-  case "$line" in *$'\\033[H'*) [ $seen -eq 1 ] && [ -n "$out" ] && break; seen=1; out="" ;; esac
+-  out="$out$line"$'\\n'
+-done
+-# No frame at all: the stream ended by itself, so Docker is not running.
+-[ $seen -eq 0 ] && { echo "docker stats ended" >&2; exit 3; }
+-kill "$D_PID" 2>/dev/null
+-printf '%s' "$out"
+-`;
+-
+-/** One sample of CPU and memory for every running container: { text } or { error }. Takes about two seconds. */
+-export async function waitStats(machine) {
+-  const r = await exec("bash", ["-c", STATS, "dockr", "30"], { ...on(machine), timeout: 60000 }).catch(failed);
++/**
++ * One sample of CPU and memory for `name`, or every running container when it is null: { text } or
++ * { error }. `--no-stream` prints one frame and exits; the streaming version this replaces waited
++ * for `ESC[H` redraw frames that this machine's engine never sends, which left the Stats tab on
++ * "Waiting for the first sample" forever.
++ */
++export async function waitStats(machine, name) {
++  const fmt = "{{.ID}}|{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}";
++  const r = await exec("docker", ["stats", "--no-stream", "--format", fmt, ...(name ? [name] : [])], { ...on(machine), timeout: 60000 }).catch(failed);
+   return r.code === 0 ? { text: r.stdout } : { error: said(r) };
+ }
+ 
+--- a/mods/dockr/logs.js	2026-11-26 05:37:12.224296300 -0500
++++ b/mods/dockr/logs.js	2026-11-26 05:37:12.224296300 -0500
+@@ -33,6 +33,8 @@
+         self.log.lines = model.addLogs(self.log.lines, got.lines, since, CAP);
+         for (const l of got.lines) if (l.at > since) since = l.at;
+         if (self.log.follow) self.log.jump = "end";
++        // One-shot reads, so wait before asking again when nothing new came back (no tight loop).
++        if (!got.lines.length && !got.ended) await new Promise((r) => setTimeout(r, 2000));
+         if (got.ended) {
+           self.log.ended[s.label] = true;
+           cx.notify();
+@@ -54,7 +56,7 @@
+   cx.spawn(async (cx) => {
+     try {
+       while (L.tab === "stats") {
+-        const r = await docker.waitStats(p.machine);
++        const r = await docker.waitStats(p.machine, p.info.container.name);
+         if (r.error) { L.errors.push(model.explain(r.error, p.machine)); return; }
+         const now = model.parseStats(r.text)[p.info.container.name];
+         if (now) L.samples = [...L.samples, now].slice(-90);

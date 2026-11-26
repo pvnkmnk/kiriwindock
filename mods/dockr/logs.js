@@ -33,6 +33,8 @@ export function init(self, cx) {
         self.log.lines = model.addLogs(self.log.lines, got.lines, since, CAP);
         for (const l of got.lines) if (l.at > since) since = l.at;
         if (self.log.follow) self.log.jump = "end";
+        // One-shot reads, so wait before asking again when nothing new came back (no tight loop).
+        if (!got.lines.length && !got.ended) await new Promise((r) => setTimeout(r, 2000));
         if (got.ended) {
           self.log.ended[s.label] = true;
           cx.notify();
@@ -54,7 +56,7 @@ function sample(self, cx) {
   cx.spawn(async (cx) => {
     try {
       while (L.tab === "stats") {
-        const r = await docker.waitStats(p.machine);
+        const r = await docker.waitStats(p.machine, p.info.container.name);
         if (r.error) { L.errors.push(model.explain(r.error, p.machine)); return; }
         const now = model.parseStats(r.text)[p.info.container.name];
         if (now) L.samples = [...L.samples, now].slice(-90);

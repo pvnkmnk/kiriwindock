@@ -44,7 +44,15 @@ if IFS= read -r -t "$max" line <&"\${D[0]}"; then
   # Docker Desktop's stand-in for a stopped engine prints its message here, not an event.
   case "$last" in "{"*) ;; *) echo "$last" >&2; echo "docker events ended" >&2; exit 3 ;; esac
 elif [ $? -le 128 ]; then
-  # Not a timeout: the stream ended by itself, so Docker is not running. Say why and fail.
+  # Not a timeout: the stream ended by itself. Some Docker-compatible engines (Kiri on Windows)
+  # close it at once instead of streaming. Ask the engine whether it is up before calling it down;
+  # if it is, poll: stand in for the missing feed with a tick every 15 s so the list stays fresh.
+  if docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
+    sleep 15
+    printf '{"timeNano":%s}
+' "$(date +%s)000000000"
+    exit 0
+  fi
   docker version --format '{{.Server.Version}}' >&2 2>&1 || true
   echo "docker events ended" >&2
   exit 3
@@ -83,36 +91,14 @@ export async function waitEvent(machine, since) {
   return { event: true, since: `${next.slice(0, -9)}.${next.slice(-9)}` };
 }
 
-// $1: container name, $2: the timestamp to continue from ("" starts with a tail), $3: the longest
-// wait in seconds, $4: how many lines the first call starts with. Prints the new lines with their
-// timestamps as soon as some arrive (at most 0.4 s of them), then "\001ended" when the stream ended.
-const LOGS = `
-c="$1"; since="$2"; max="$3"; tail="$4"
-set -- docker logs -f --timestamps
-if [ -n "$since" ]; then set -- "$@" --since "$since"; else set -- "$@" --tail "$tail"; fi
-coproc D { exec "$@" "$c" 2>&1; }
-n=0
-IFS= read -r -t "$max" line <&"\${D[0]}"; rc=$?
-if [ $rc -eq 0 ]; then
-  printf '%s\\n' "$line"; n=1; end=$(( \${EPOCHREALTIME//[.,]/} + 400000 ))
-  while [ $n -lt 4000 ] && [ \${EPOCHREALTIME//[.,]/} -lt $end ]; do
-    IFS= read -r -t 0.15 line <&"\${D[0]}"; rc=$?
-    [ $rc -eq 0 ] || break
-    printf '%s\\n' "$line"; n=$((n+1))
-  done
-fi
-kill "$D_PID" 2>/dev/null
-[ $rc -eq 1 ] && printf '\\001ended\\n'
-exit 0
-`;
-
 /**
- * Waits for a container's next log lines, at most a minute. Resolves { text } with the new lines
- * (each starts with its timestamp, and a last line "\x01ended" says the container stopped writing),
- * or { error } when the wait could not run.
+ * Reads a container's new log lines, at most a minute: { text } with each line prefixed by its
+ * timestamp. One-shot `docker logs`, not `logs -f`: this machine's engine (Kiri on Windows) never
+ * closes a followed stream, so the streaming version printed nothing and the log view stayed empty.
  */
 export async function waitLogs(machine, name, since, tail = 300) {
-  const r = await exec("bash", ["-c", LOGS, "dockr", name, since ?? "", "60", String(tail)], { ...on(machine), timeout: 90000 }).catch(failed);
+  const args = ["logs", "--timestamps", ...(since ? ["--since", since] : ["--tail", String(tail)]), name];
+  const r = await exec("docker", args, { ...on(machine), timeout: 90000 }).catch(failed);
   return r.code === 0 ? { text: r.stdout } : { error: said(r) };
 }
 
@@ -123,23 +109,15 @@ export async function waitStart(machine, name) {
   return r.code === 0 ? { started: r.stdout.includes("started") } : { error: said(r) };
 }
 
-// Prints one sample of every running container from Docker's stats stream. $1: the longest wait.
-const STATS = `
-coproc D { exec docker stats --format '{{.ID}}|{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}' 2>/dev/null; }
-out=""; seen=0
-while IFS= read -r -t "$1" line <&"\${D[0]}"; do
-  case "$line" in *$'\\033[H'*) [ $seen -eq 1 ] && [ -n "$out" ] && break; seen=1; out="" ;; esac
-  out="$out$line"$'\\n'
-done
-# No frame at all: the stream ended by itself, so Docker is not running.
-[ $seen -eq 0 ] && { echo "docker stats ended" >&2; exit 3; }
-kill "$D_PID" 2>/dev/null
-printf '%s' "$out"
-`;
-
-/** One sample of CPU and memory for every running container: { text } or { error }. Takes about two seconds. */
-export async function waitStats(machine) {
-  const r = await exec("bash", ["-c", STATS, "dockr", "30"], { ...on(machine), timeout: 60000 }).catch(failed);
+/**
+ * One sample of CPU and memory for `name`, or every running container when it is null: { text } or
+ * { error }. `--no-stream` prints one frame and exits; the streaming version this replaces waited
+ * for `ESC[H` redraw frames that this machine's engine never sends, which left the Stats tab on
+ * "Waiting for the first sample" forever.
+ */
+export async function waitStats(machine, name) {
+  const fmt = "{{.ID}}|{{.Name}}|{{.CPUPerc}}|{{.MemUsage}}|{{.NetIO}}|{{.BlockIO}}";
+  const r = await exec("docker", ["stats", "--no-stream", "--format", fmt, ...(name ? [name] : [])], { ...on(machine), timeout: 60000 }).catch(failed);
   return r.code === 0 ? { text: r.stdout } : { error: said(r) };
 }
 

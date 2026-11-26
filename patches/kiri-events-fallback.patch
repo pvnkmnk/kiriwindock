@@ -1,0 +1,19 @@
+--- a/mods/dockr/docker.js	2026-11-26 05:12:34.387099000 -0500
++++ b/mods/dockr/docker.js	2026-11-26 05:12:34.422400300 -0500
+@@ -44,7 +44,15 @@
+   # Docker Desktop's stand-in for a stopped engine prints its message here, not an event.
+   case "$last" in "{"*) ;; *) echo "$last" >&2; echo "docker events ended" >&2; exit 3 ;; esac
+ elif [ $? -le 128 ]; then
+-  # Not a timeout: the stream ended by itself, so Docker is not running. Say why and fail.
++  # Not a timeout: the stream ended by itself. Some Docker-compatible engines (Kiri on Windows)
++  # close it at once instead of streaming. Ask the engine whether it is up before calling it down;
++  # if it is, poll: stand in for the missing feed with a tick every 15 s so the list stays fresh.
++  if docker version --format '{{.Server.Version}}' >/dev/null 2>&1; then
++    sleep 15
++    printf '{"timeNano":%s}
++' "$(date +%s)000000000"
++    exit 0
++  fi
+   docker version --format '{{.Server.Version}}' >&2 2>&1 || true
+   echo "docker events ended" >&2
+   exit 3
